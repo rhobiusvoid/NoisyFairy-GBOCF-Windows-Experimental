@@ -57,6 +57,7 @@ ssize_t pread(int fd, void *buffer, size_t count, int64_t offset);
 ssize_t pwrite(int fd, const void *buffer, size_t count, int64_t offset);
 ssize_t compat_read_locked(int fd, void *buffer, size_t count);
 ssize_t compat_write_locked(int fd, const void *buffer, size_t count);
+int64_t compat_lseek_locked(int fd, int64_t offset, int whence);
 int fsync(int fd);
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);

@@ -536,13 +536,30 @@ static ABI int32_t map_flexible_named(void **inout, uint64_t size, int prot, int
     (void)name; return map_flexible(inout,size,prot,flags);
 }
 static ABI int32_t release_flexible(void *address, uint64_t size) { return direct_unmap(address,size); }
-/* POSIX mmap as libc uses it: anonymous memory from the flexible pool. File mappings fail with
- * ENODEV (no guest file descriptor can be mapped). */
+/* POSIX mmap as libc uses it: memory from the flexible pool. A file mapping is a private copy
+ * read in once (no write-back), after DiamondDogz/GBO-Code-Fairy-PS4RT-Windows (GPL). */
+#define MMAP_FILE_LIMIT (UINT64_C(1)<<30)
 static ABI void *posix_mmap(void *address, uint64_t size, int prot, int flags, int fd, int64_t offset) {
-    if (!(flags & 0x1000) || fd!=-1 || offset) { *runtime_errno()=19; return (void *)-1; }
+    if (!size || offset<0 || (offset & (PAGE-1))) { *runtime_errno()=22; return (void *)-1; }
+    int anon=flags & 0x1000;
+    if (anon) {
+        if (fd!=-1 || offset) { *runtime_errno()=22; return (void *)-1; }
+    } else if (fd<0) { *runtime_errno()=9; return (void *)-1; }
+    else if (size>MMAP_FILE_LIMIT) { *runtime_errno()=12; return (void *)-1; }
+    uint64_t bytes=(size+PAGE-1)&~(PAGE-1);
     void *out=address;
-    int32_t r=map_flexible(&out,(size+PAGE-1)&~(PAGE-1),prot,flags & 0x10);
+    int32_t r=map_flexible(&out,bytes,prot,flags & 0x10);
     if (r) { *runtime_errno()=12; return (void *)-1; }
+    if (!anon) {
+        memset(out,0,bytes);
+        for (uint64_t done=0; done<size; ) {
+            int64_t n=runtime_file_pread(fd,(char *)out+done,size-done,offset+(int64_t)done);
+            if (n<0) { direct_unmap(out,bytes); *runtime_errno()=n==-9 ? 9 : 5; return (void *)-1; }
+            if (!n) break;
+            done+=(uint64_t)n;
+        }
+        printf("Runtime: mapped file fd=%d at %p, %" PRIu64 " bytes from offset %" PRId64 "\n",fd,out,size,offset);
+    }
     return out;
 }
 static ABI int32_t posix_msync(void *address, uint64_t size, int flags) { (void)address; (void)size; (void)flags; return 0; }

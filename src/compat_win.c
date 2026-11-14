@@ -226,6 +226,15 @@ ssize_t compat_write_locked(int fd, const void *buffer, size_t count) {
     ReleaseSRWLockShared(lock);
     return n;
 }
+/* lseek excludes pread/pwrite, which move the file pointer temporarily and then restore it:
+ * an unlocked seek landing in that window would be undone. */
+int64_t compat_lseek_locked(int fd, int64_t offset, int whence) {
+    SRWLOCK *lock = fd_lock(fd);
+    AcquireSRWLockExclusive(lock);
+    int64_t r = _lseeki64(fd, offset, whence);
+    ReleaseSRWLockExclusive(lock);
+    return r;
+}
 int fsync(int fd) { return _commit(fd); }
 
 /* ---- environment ---- */

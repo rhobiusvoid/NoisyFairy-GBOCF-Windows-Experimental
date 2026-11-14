@@ -469,6 +469,79 @@ void runtime_restart(void) {
 /* The guest code needs the PS4's instruction sets (#33, #66); PS4RT_CPU_CHECK=0 skips this. A
  * missing fatal set prints STOP and returns 0; the rewritable ones go to cpu_missing_sets, named
  * in missing. */
+/* Archive completeness check, adapted from DiamondDogz/GBO-Code-Fairy-PS4RT-Windows (GPL).
+ * A CPK cut short by an interrupted extraction loads as empty buffers past its end. */
+static uint64_t cpk_declared_end(const char *path) {
+    unsigned char b[0x800];
+    FILE *f = fopen(path, "rb");
+    size_t got;
+    if (!f) return 0;
+    got = fread(b, 1, sizeof b, f);
+    fclose(f);
+    if (got < 0x40 || memcmp(b, "CPK ", 4) || memcmp(b + 0x10, "@UTF", 4)) return 0;
+    const unsigned char *t = b + 0x18;
+    size_t tlen = got - 0x18;
+#define BE16(p) (((unsigned)(p)[0] << 8) | (p)[1])
+#define BE32(p) (((uint32_t)(p)[0] << 24) | ((uint32_t)(p)[1] << 16) | ((uint32_t)(p)[2] << 8) | (p)[3])
+    unsigned rows = BE16(t + 2), cols = BE16(t + 16);
+    uint32_t strs = BE32(t + 4);
+    size_t pos = 24, rp = rows;
+    uint64_t offs[5] = {0}, sizes[5] = {0};
+    static const char *const names[5] = { "Content", "Toc", "Itoc", "Etoc", "Gtoc" };
+    if (strs >= tlen) return 0;
+    for (unsigned c = 0; c < cols && pos + 5 <= tlen; ++c) {
+        unsigned flag = t[pos], type = flag & 15, store = flag & 0xf0;
+        uint32_t name = BE32(t + pos + 1);
+        size_t sz = type <= 1 ? 1 : type <= 3 ? 2 : (type == 6 || type == 7 || type == 0xb) ? 8 : 4;
+        const unsigned char *raw = NULL;
+        pos += 5;
+        if (store == 0x30) { if (pos + sz > tlen) return 0; raw = t + pos; pos += sz; }
+        else if (store == 0x50) { if (rp + sz > tlen) return 0; raw = t + rp; rp += sz; }
+        if (!raw || (type != 6 && type != 7) || strs + name >= tlen) continue;
+        uint64_t v = ((uint64_t)BE32(raw) << 32) | BE32(raw + 4);
+        const char *n = (const char *)t + strs + name;
+        for (int k = 0; k < 5; ++k) {
+            size_t l = strlen(names[k]);
+            if (!strncmp(n, names[k], l) && !strcmp(n + l, "Offset")) offs[k] = v;
+            if (!strncmp(n, names[k], l) && !strcmp(n + l, "Size")) sizes[k] = v;
+        }
+    }
+#undef BE16
+#undef BE32
+    uint64_t end = 0;
+    for (int k = 0; k < 5; ++k) if (offs[k] + sizes[k] > end) end = offs[k] + sizes[k];
+    return end;
+}
+static void check_cpk_archives(const char *app0) {
+    static const char *const names[] = { "game_ss.cpk", "game_all_in.cpk", "init_data.cpk", "stream.cpk", "update000.cpk" };
+    int bad = 0;
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; ++i) {
+        char path[1024];
+        FILE *f;
+        long long real;
+        uint64_t end;
+        snprintf(path, sizeof path, "%s/%s", app0, names[i]);
+        if (!(f = fopen(path, "rb"))) continue;
+#ifdef _WIN32
+        _fseeki64(f, 0, SEEK_END); real = _ftelli64(f);
+#else
+        fseeko(f, 0, SEEK_END); real = (long long)ftello(f);
+#endif
+        fclose(f);
+        end = cpk_declared_end(path);
+        if (end && (uint64_t)real < end) {
+            ++bad;
+            fprintf(stderr, "ARCHIVE INCOMPLETE: %s is %lld bytes, its header needs %llu (%llu missing).\n",
+                    names[i], real, (unsigned long long)end, (unsigned long long)(end - (uint64_t)real));
+        }
+    }
+    if (bad) {
+        fputs("ARCHIVE INCOMPLETE: files past the end load as empty buffers and the game will crash later.\n"
+              "  The copy on disk was cut short (an interrupted extraction or an incomplete base PKG).\n"
+              "  game_ss.cpk comes from the base game, not from an update: re-extract it from a complete base PKG.\n", stderr);
+        fflush(stderr);
+    }
+}
 static int cpu_supported(char *missing, size_t size) {
     missing[0] = 0;
     const char *check = getenv("PS4RT_CPU_CHECK");
@@ -573,6 +646,7 @@ int main(int argc, char **argv) {
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");
+        check_cpk_archives(app0);
         for (int i = 0; i < mount_count; ++i) {
             const char *eq = strchr(mounts[i], '=');
             char guest[64];
