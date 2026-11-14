@@ -933,6 +933,9 @@ bool PipelineCache::CheckCacheProfile() {
 }
 
 void PipelineCache::WarmUp(const std::function<void(u32, u32)>& progress) {
+    if (const char* skip = std::getenv("PS4RT_NO_WARMUP"); skip && skip[0] == '1') {
+        return;
+    }
     if (!CheckCacheProfile()) {
         return;
     }
@@ -1085,6 +1088,11 @@ struct PipelineCache::BackgroundWarmup {
 };
 
 bool PipelineCache::StartBackgroundWarmUp() {
+    // Diagnostics: PS4RT_NO_WARMUP=1 builds every pipeline live, ignoring the stored ones.
+    if (const char* skip = std::getenv("PS4RT_NO_WARMUP"); skip && skip[0] == '1') {
+        std::printf("Pipeline warm-up: skipped (PS4RT_NO_WARMUP)\n");
+        return true;
+    }
     if (!Storage::DataBase::Instance().ConcurrentReads()) {
         return false;
     }
