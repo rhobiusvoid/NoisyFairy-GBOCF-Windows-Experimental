@@ -52,3 +52,4 @@ Refer to the included third-party source and license files for the applicable te
 
 A distinct PS4RT project name does not change the copyright or origin of
 code incorporated from upstream projects.
+- [DiamondDogz/GBO-Code-Fairy-PS4RT-Windows](https://github.com/DiamondDogz/GBO-Code-Fairy-PS4RT-Windows): the boot-time CPK truncation check (`check_cpk_archives` in `src/loader.c`) and the file-backed `mmap` (`posix_mmap` in `src/runtime_memory.c`) are adapted from this repository (GPL-2.0-or-later). The locked `lseek` follows the same idea of excluding positioned I/O.
