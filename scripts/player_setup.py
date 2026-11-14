@@ -188,9 +188,19 @@ def _setup_progress(root: Path, *, kind: str, total: int, show_window: bool):
             message = " ".join(str(message).split())[:300]
             step = max(0, min(total, int(completed)))
             temp = status_file.with_suffix(".next")
-            temp.write_text(f"{state}\t{step}\t{total}\t{message}\n",
-                            encoding="utf8")
-            temp.replace(status_file)
+            # The progress window may have the status file open for reading at this moment, and
+            # Windows then refuses the rename (WinError 5). A progress update must never abort
+            # the install: retry briefly, then skip this update.
+            for attempt in range(40):
+                try:
+                    temp.write_text(f"{state}\t{step}\t{total}\t{message}\n",
+                                    encoding="utf8")
+                    temp.replace(status_file)
+                    break
+                except PermissionError:
+                    time.sleep(0.02)
+                except OSError:
+                    break
 
         publish("Preparing DLC installation..." if is_dlc else "Preparing update...", 0)
         viewer = None

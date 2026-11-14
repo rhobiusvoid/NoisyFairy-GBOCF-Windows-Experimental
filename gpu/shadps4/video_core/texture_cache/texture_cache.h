@@ -444,6 +444,7 @@ private:
     }
 
     void GarbageCollectImages();
+    void LogMemoryBreakdown();
     void GarbageCollectSamplers();
 
 private:
@@ -461,6 +462,7 @@ private:
     std::unordered_set<ImageId> download_images;
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< ps4rt: pressure report
+    u64 gc_emergencies = 0, gc_emergency_images = 0;
     std::chrono::steady_clock::time_point gc_report_time{};
     u64 trigger_gc_memory = 0;
     u64 pressure_gc_memory = 0;

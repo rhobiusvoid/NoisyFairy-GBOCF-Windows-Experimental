@@ -441,6 +441,7 @@ int main(int, char**) {
     std::string notice;
     int tab = 0;
     bool log_to_file = launcher_ini.num("log_to_file", 1) != 0;
+    std::string cache_message;
     bool child_dlc = false;
 #ifdef _WIN32
     HANDLE child = nullptr;
@@ -678,6 +679,30 @@ int main(int, char**) {
                     ShellExecuteW(nullptr, L"open", log_dir.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 }
 #endif
+            }
+            section("SHADER CACHE");
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::PushTextWrapPos(kCol - 20);
+                ImGui::TextUnformatted("If the game shows exploding or stretched geometry, deleting the shader cache usually fixes it. It is rebuilt automatically; expect some stutter the first time through each area.");
+                ImGui::PopTextWrapPos();
+                ImGui::PopStyleColor();
+                if (nf_button("Clear shader cache", {200, 0}) && !busy) {
+                    std::error_code ec;
+                    const fs::path cache_dir = out_dir / "user" / "gpu" / "cache";
+                    size_t removed = 0;
+                    if (fs::exists(cache_dir, ec)) {
+                        for (const auto& entry : fs::directory_iterator(cache_dir, ec)) {
+                            removed += size_t(fs::remove_all(entry.path(), ec));
+                        }
+                    }
+                    cache_message = removed ? "Shader cache cleared." : "The shader cache is already empty.";
+                }
+                if (!cache_message.empty()) {
+                    ImGui::SameLine(0, 12);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(cache_message.c_str());
+                }
             }
             ImGui::Dummy({0, 6});
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));

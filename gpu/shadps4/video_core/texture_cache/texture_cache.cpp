@@ -35,6 +35,7 @@
 #include "video_core/texture_cache/texture_cache.h"
 #include <vulkan/vulkan_format_traits.hpp>
 #include "video_core/texture_cache/tile_manager.h"
+#include <vk_mem_alloc.h>
 
 namespace VideoCore {
 
@@ -1776,6 +1777,24 @@ void TextureCache::GarbageCollectImages() {
         configure(true);
         lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy, clean_up);
     }
+    // ps4rt: the sizes above come from the heap size at start-up. When the driver's budget for
+    // this process is smaller (other programs hold video memory, or a 4 GB card), the process
+    // ran into an out-of-device-memory failure while the collector found nothing old enough
+    // to free. Past 92% of the live budget, free images that were idle for just a few frames.
+    if (instance.CanReportMemoryUsage()) {
+        const u64 budget_now = instance.GetDeviceMemoryBudgetNow();
+        if (budget_now != 0 && total_used_memory >= budget_now / 100 * 92) {
+            pressured = true;
+            aggresive = true;
+            ticks_to_destroy = std::min<u64>(3, gc_tick);
+            num_deletions = 64;
+            const u64 before = total_used_memory;
+            lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy, clean_up);
+            ++gc_emergencies;
+            gc_emergency_images = gc_evictions;
+            (void)before;
+        }
+    }
     // ps4rt: evictions under memory pressure, at most every 5 s (PS4RT_FRAME_STATS or not).
     if (pressured || gc_downloads != 0) {
         const auto now = std::chrono::steady_clock::now();
@@ -1786,6 +1805,7 @@ void TextureCache::GarbageCollectImages() {
                         (unsigned long long)(pressure_gc_memory >> 20),
                         (unsigned long long)(critical_gc_memory >> 20),
                         (unsigned long long)gc_evictions, (unsigned long long)gc_downloads);
+            LogMemoryBreakdown();
             gc_report_time = now;
             gc_evictions = gc_downloads = 0;
         }
@@ -1830,6 +1850,45 @@ void TextureCache::GarbageCollectSamplers() {
         configure(true);
         sampler_lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy, clean_up);
     }
+}
+
+void TextureCache::LogMemoryBreakdown() {
+    // Where the video memory is: images by age, and what the allocator holds besides them.
+    u64 count = 0, bytes = 0, idle16 = 0, idle80 = 0, idle160 = 0;
+    u64 bytes16 = 0, bytes80 = 0, bytes160 = 0, biggest = 0;
+    lru_cache.ForEachItemBelow(gc_tick + 1, [&](ImageId id) {
+        const auto& image = slot_images[id];
+        const u64 size = image.backing ? u64(image.GetHostImageSize()) : 0;
+        const u64 idle = gc_tick - image.lru_touched_tick;
+        ++count;
+        bytes += size;
+        biggest = std::max(biggest, size);
+        if (idle >= 16) { ++idle16; bytes16 += size; }
+        if (idle >= 80) { ++idle80; bytes80 += size; }
+        if (idle >= 160) { ++idle160; bytes160 += size; }
+        return false;
+    });
+    std::printf("Texture cache: %llu images, %llu MiB (largest %llu MiB); idle 16+ ticks: %llu "
+                "(%llu MiB), 80+: %llu (%llu MiB), 160+: %llu (%llu MiB); emergency passes %llu\n",
+                (unsigned long long)count, (unsigned long long)(bytes >> 20),
+                (unsigned long long)(biggest >> 20), (unsigned long long)idle16,
+                (unsigned long long)(bytes16 >> 20), (unsigned long long)idle80,
+                (unsigned long long)(bytes80 >> 20), (unsigned long long)idle160,
+                (unsigned long long)(bytes160 >> 20), (unsigned long long)gc_emergencies);
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS]{};
+    vmaGetHeapBudgets(instance.GetAllocator(), budgets);
+    u64 vma_blocks = 0, vma_allocs = 0, usage = 0, budget = 0;
+    for (const size_t heap : instance.GetValidHeaps()) {
+        vma_blocks += budgets[heap].statistics.blockBytes;
+        vma_allocs += budgets[heap].statistics.allocationBytes;
+        usage += budgets[heap].usage;
+        budget += budgets[heap].budget;
+    }
+    std::printf("Video memory: driver usage %llu MiB of budget %llu MiB; allocator blocks %llu MiB, "
+                "allocations %llu MiB (images above: %llu MiB)\n",
+                (unsigned long long)(usage >> 20), (unsigned long long)(budget >> 20),
+                (unsigned long long)(vma_blocks >> 20), (unsigned long long)(vma_allocs >> 20),
+                (unsigned long long)(bytes >> 20));
 }
 
 void TextureCache::RunGarbageCollector() {

@@ -71,6 +71,11 @@ public:
         return pipeline_binary_global_key;
     }
 
+    /// Heaps whose usage counts toward the device memory budget.
+    std::span<const size_t> GetValidHeaps() const {
+        return valid_heaps;
+    }
+
     /// Returns the VMA allocator handle
     VmaAllocator GetAllocator() const {
         return allocator;

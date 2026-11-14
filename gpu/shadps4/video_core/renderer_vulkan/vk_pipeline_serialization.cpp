@@ -38,6 +38,11 @@ namespace Serialization {
 static constexpr u32 ShaderBinaryVersion = 11u; // ps4rt: bounded terrain V_MOVRELS (CUSA28763)
 static constexpr u32 ShaderMetaVersion = 9u; // ps4rt: refreshed color export specialization
 static constexpr u32 PipelineKeyVersion = 7u; // ps4rt: corrected color write-mask direction
+/* ps4rt: whole-cache generation. Bump it whenever shader generation, specialization or the
+ * cache layout changes: a cache from another generation is discarded and rebuilt at startup
+ * (stale SPIR-V from earlier builds showed up as exploding vertices until the folder was
+ * deleted by hand). */
+static constexpr u32 CacheGeneration = 2u;
 } // namespace Serialization
 
 namespace Vulkan {
@@ -889,29 +894,37 @@ bool PipelineCache::CheckCacheProfile() {
     if (profile_data.empty()) {
         Storage::DataBase::Instance().FinishPreload();
 
-        profile_data.resize(sizeof(profile));
+        profile_data.resize(sizeof(profile) + sizeof(u32));
         std::memcpy(profile_data.data(), &profile, sizeof(profile));
+        std::memcpy(profile_data.data() + sizeof(profile), &Serialization::CacheGeneration,
+                    sizeof(u32));
         Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
                                            std::move(profile_data));
         return false;
     }
-    if (profile_data.size() != sizeof(Shader::Profile)) {
+    if (profile_data.size() != sizeof(Shader::Profile) + sizeof(u32)) {
         LOG_WARNING(Render, "Pipeline cache profile has unexpected size ({} != {})",
-                    profile_data.size(), sizeof(Shader::Profile));
+                    profile_data.size(), sizeof(Shader::Profile) + sizeof(u32));
     }
     Shader::Profile cached_profile{};
-    if (profile_data.size() == sizeof(Shader::Profile)) {
+    u32 cached_generation = 0;
+    if (profile_data.size() == sizeof(Shader::Profile) + sizeof(u32)) {
         std::memcpy(&cached_profile, profile_data.data(), sizeof(cached_profile));
+        std::memcpy(&cached_generation, profile_data.data() + sizeof(cached_profile),
+                    sizeof(u32));
     }
-    if (profile_data.size() != sizeof(Shader::Profile) || cached_profile != profile) {
+    if (profile_data.size() != sizeof(Shader::Profile) + sizeof(u32) || cached_profile != profile ||
+        cached_generation != Serialization::CacheGeneration) {
         // ps4rt: upstream closed the cache for the session here, so it was never rewritten
         // and every later session compiled every shader again (stutters on each new area).
         // Start a fresh cache for this build and GPU instead.
         LOG_WARNING(Render, "Pipeline cache isn't compatible with current system: rebuilding it");
         Storage::DataBase::Instance().Clear();
         Storage::DataBase::Instance().FinishPreload();
-        profile_data.resize(sizeof(profile));
+        profile_data.resize(sizeof(profile) + sizeof(u32));
         std::memcpy(profile_data.data(), &profile, sizeof(profile));
+        std::memcpy(profile_data.data() + sizeof(profile), &Serialization::CacheGeneration,
+                    sizeof(u32));
         Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
                                            std::move(profile_data));
         return false;
