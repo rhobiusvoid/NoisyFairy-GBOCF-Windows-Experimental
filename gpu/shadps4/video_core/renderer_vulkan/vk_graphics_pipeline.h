@@ -105,6 +105,17 @@ public:
         return fetch_shader;
     }
 
+    // Diagnostics (PS4RT_WARM_VERIFY): origin and baked inputs of a pipeline.
+    bool warm_built{false};
+    mutable bool warm_verified{false};
+    std::array<vk::ShaderModule, MaxShaderStages> built_modules{};
+    SerializationSupport built_sdata{};
+    std::array<const Shader::Info*, MaxShaderStages> GetStages() const {
+        std::array<const Shader::Info*, MaxShaderStages> out{};
+        std::ranges::copy(stages, out.begin());
+        return out;
+    }
+
     const GraphicsPipelineKey& GetGraphicsKey() const {
         return key;
     }

@@ -753,6 +753,71 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             return nullptr; // A real compilation/stage failure, rather than pending work.
         }
     }
+    // Diagnostics: PS4RT_WARM_VERIFY=1 builds a live pipeline for the first draw that uses a
+    // warm-built one and logs every difference between the two.
+    static const bool verify_warm = [] {
+        const char* v = std::getenv("PS4RT_WARM_VERIFY");
+        return v && v[0] == '1';
+    }();
+    if (verify_warm) {
+        const auto warm_it = graphics_pipelines.find(sel.graphics_key);
+        if (warm_it != graphics_pipelines.end() && warm_it->second->warm_built &&
+            !warm_it->second->warm_verified) {
+            const auto& wp = *warm_it->second;
+            wp.warm_verified = true;
+            const u64 hash = std::hash<GraphicsPipelineKey>{}(sel.graphics_key);
+            u32 diffs = 0;
+            const auto report = [&](const char* what) {
+                ++diffs;
+                std::printf("WarmVerify %#llx: DIFF %s\n", (unsigned long long)hash, what);
+            };
+            GraphicsPipeline::SerializationSupport live_sdata{};
+            GraphicsPipeline live(instance, scheduler, desc_heap, profile, sel.graphics_key,
+                                  *pipeline_cache, sel.infos, sel.runtime_infos, sel.fetch_shader,
+                                  sel.modules, live_sdata, false);
+            for (u32 i = 0; i < MaxShaderStages; ++i) {
+                if (wp.built_modules[i] != sel.modules[i]) {
+                    std::printf("WarmVerify %#llx: stage %u module warm=%p live=%p\n",
+                                (unsigned long long)hash, i, (void*)VkShaderModule(wp.built_modules[i]),
+                                (void*)VkShaderModule(sel.modules[i]));
+                    report("shader module");
+                }
+                if (wp.GetStages()[i] != sel.infos[i]) {
+                    report("stage Info pointer");
+                }
+            }
+            const auto& wf = wp.GetFetchShader();
+            if (wf.has_value() != sel.fetch_shader.has_value()) {
+                report("fetch shader presence");
+            } else if (wf && !(*wf == *sel.fetch_shader)) {
+                report("fetch shader contents");
+            } else if (wf) {
+                for (size_t a = 0; a < wf->attributes.size(); ++a) {
+                    const auto& x = wf->attributes[a];
+                    const auto& y = sel.fetch_shader->attributes[a];
+                    if (x.inst_offset != y.inst_offset || x.data_format != y.data_format ||
+                        x.num_format != y.num_format) {
+                        report("fetch attribute format/offset");
+                    }
+                }
+            }
+            const auto& ws = wp.built_sdata;
+            if (ws.vertex_attributes.size() != live_sdata.vertex_attributes.size() ||
+                ws.vertex_bindings.size() != live_sdata.vertex_bindings.size()) {
+                report("vertex input sizes (ignored when dynamic)");
+            }
+            if (ws.tcs != live_sdata.tcs) report("tcs");
+            if (ws.tes != live_sdata.tes) report("tes");
+            if (ws.fragment != live_sdata.fragment) report("discard fragment shader");
+            if (ws.multisampling.rasterizationSamples != live_sdata.multisampling.rasterizationSamples ||
+                ws.multisampling.sampleShadingEnable != live_sdata.multisampling.sampleShadingEnable ||
+                ws.multisampling.minSampleShading != live_sdata.multisampling.minSampleShading) {
+                report("multisampling");
+            }
+            std::printf("WarmVerify %#llx: %s (%u differences)\n", (unsigned long long)hash,
+                        diffs ? "MISMATCH" : "ok", diffs);
+        }
+    }
     if (AsyncCompilation() && !sel.regs->stage_enable.hs_en && !EmulatorSettings.IsShaderCollect()) {
         const auto found = graphics_pipelines.find(sel.graphics_key);
         if (found != graphics_pipelines.end()) {

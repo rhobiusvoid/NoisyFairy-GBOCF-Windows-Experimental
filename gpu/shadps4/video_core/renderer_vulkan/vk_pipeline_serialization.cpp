@@ -1332,6 +1332,10 @@ void PipelineCache::PumpWarmUp() {
                     instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
                     no_runtime_infos, fetch, modules, sdata, true);
             }
+            if (built.graphics) {
+                built.graphics->warm_built = true;
+                built.graphics->built_sdata = sdata;
+            }
             warm.built.Push(std::move(built));
             return true;
         });
