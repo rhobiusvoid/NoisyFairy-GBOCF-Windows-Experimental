@@ -1303,6 +1303,16 @@ void PipelineCache::PumpWarmUp() {
             warm.done.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
+        // Diagnostics: PS4RT_WARM_MODE=programs keeps the preloaded shader programs but builds no
+        // pipelines from the store (the game creates them on first use).
+        static const bool programs_only = [] {
+            const char* mode = std::getenv("PS4RT_WARM_MODE");
+            return mode && std::string_view(mode) == "programs";
+        }();
+        if (programs_only) {
+            warm.done.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
         ++warm.submitted;
         warm.pool->Push([this, &warm, queued = std::chrono::steady_clock::now(),
                           compute = entry.compute, graphics_key = entry.graphics_key,
