@@ -63,6 +63,19 @@ typedef struct GuestThread {
 } GuestThread;
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+/* Owner tracking for `lock` (stall diagnostics): who holds it and from which line. A boot stall
+ * had two threads blocked on it with no thread holding it. */
+static volatile unsigned long lock_owner_tid;
+static volatile int lock_owner_line;
+static volatile unsigned long lock_waiting_tid;
+#ifdef _WIN32
+#define LOCK_TID() ((unsigned long)GetCurrentThreadId())
+#else
+#define LOCK_TID() ((unsigned long)(uintptr_t)pthread_self())
+#endif
+#define TLOCK() do { lock_waiting_tid=LOCK_TID(); pthread_mutex_lock(&lock); lock_waiting_tid=0; \
+    lock_owner_tid=LOCK_TID(); lock_owner_line=__LINE__; } while (0)
+#define TUNLOCK() do { lock_owner_tid=0; pthread_mutex_unlock(&lock); } while (0)
 static ThreadAttr *attributes;
 static GuestThread *threads;
 static _Thread_local GuestThread *current;
@@ -124,7 +137,7 @@ static GuestThread *new_thread(void) {
     return t;
 }
 static void publish(GuestThread *t) {
-    pthread_mutex_lock(&lock); t->next=threads; threads=t; pthread_mutex_unlock(&lock);
+    TLOCK(); t->next=threads; threads=t; TUNLOCK();
 }
 /* Host threads that call into guest code without being created by the guest
  * (the main thread, test threads) get a record on first use. */
@@ -150,17 +163,17 @@ void runtime_thread_attach_main(void) {
 int32_t runtime_thread_current_priority(void) { return runtime_thread_current()->attr.prio; }
 static GuestThread *find_thread(void *handle) {
     GuestThread *found=NULL;
-    pthread_mutex_lock(&lock);
+    TLOCK();
     for (GuestThread *t=threads;t;t=t->next) if (t==handle) { found=t; break; }
-    pthread_mutex_unlock(&lock);
+    TUNLOCK();
     return found;
 }
 static ThreadAttr *find_attr(ThreadAttr **slot) {
     if (!slot || !*slot) return NULL;
     ThreadAttr *found=NULL;
-    pthread_mutex_lock(&lock);
+    TLOCK();
     for (ThreadAttr *a=attributes;a;a=a->next) if (a==*slot && a->magic==ATTR_MAGIC) { found=a; break; }
-    pthread_mutex_unlock(&lock);
+    TUNLOCK();
     return found;
 }
 
@@ -182,17 +195,17 @@ static ABI int32_t attr_init(ThreadAttr **out) {
     ThreadAttr *a=calloc(1,sizeof(*a));
     if (!a) return ERR(12);
     *a=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=4096,.affinity=0x7f};
-    pthread_mutex_lock(&lock); a->next=attributes; attributes=a; pthread_mutex_unlock(&lock);
+    TLOCK(); a->next=attributes; attributes=a; TUNLOCK();
     *out=a; return 0;
 }
 static ABI int32_t attr_destroy(ThreadAttr **slot) {
     ThreadAttr *a=find_attr(slot);
     if (!a) return ERR(22);
-    pthread_mutex_lock(&lock);
+    TLOCK();
     ThreadAttr **link=&attributes;
     while (*link!=a) link=&(*link)->next;
     *link=a->next; a->magic=0;
-    pthread_mutex_unlock(&lock);
+    TUNLOCK();
     free(a); *slot=NULL; return 0;
 }
 static ABI int32_t attr_get(void *thread,ThreadAttr **out) {
@@ -291,7 +304,7 @@ static void *host_start(void *p) {
     runtime_thread_keys_cleanup();
     PS4RT_LOADING_EVENT(PS4RT_LOAD_THREAD_EXIT, t->entry, 0);
     PS4RT_LOADING_NOTE("thread-exit name=%s", t->name);
-    pthread_mutex_lock(&lock); t->finished=1; ++exited; pthread_mutex_unlock(&lock);
+    TLOCK(); t->finished=1; ++exited; TUNLOCK();
     return t->result;
 }
 static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,void *argument,const char *name) {
@@ -324,7 +337,7 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     pthread_attr_destroy(&host);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); exit(21); }
     if (t->detached) pthread_detach(t->host);
-    pthread_mutex_lock(&lock); ++created; pthread_mutex_unlock(&lock);
+    TLOCK(); ++created; TUNLOCK();
     printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
     return 0;
 }
@@ -342,7 +355,7 @@ static ABI int32_t thread_join(GuestThread *t,void **result) {
     runtime_wait_end();
     if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); exit(21); }
     if (result) *result=t->result;
-    pthread_mutex_lock(&lock); ++joined_count; pthread_mutex_unlock(&lock);
+    TLOCK(); ++joined_count; TUNLOCK();
     return 0;
 }
 static ABI int32_t thread_detach(GuestThread *t) {
@@ -368,9 +381,9 @@ static ABI int32_t thread_get_prio(GuestThread *t,int *prio) {
 static ABI int32_t thread_get_sched(GuestThread *t,int *policy,int *param) {
     if (!policy || !param) return ERR(22);
     if (!find_thread(t)) return ERR(3);
-    pthread_mutex_lock(&lock);
+    TLOCK();
     *policy=t->attr.policy; *param=t->attr.prio;
-    pthread_mutex_unlock(&lock);
+    TUNLOCK();
     return 0;
 }
 static ABI int32_t thread_set_prio(GuestThread *t,int prio) {
@@ -438,9 +451,9 @@ uintptr_t runtime_thread_resolve(const char *name) {
     return 0;
 }
 void runtime_thread_report(void) {
-    pthread_mutex_lock(&lock);
+    TLOCK();
     printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",created,exited,joined_count);
-    pthread_mutex_unlock(&lock);
+    TUNLOCK();
 }
 
 
@@ -468,13 +481,13 @@ static void watch_dump(unsigned long seconds) {
     static WatchRow rows[WATCH_MAX];
     size_t n=0;
     uint64_t now=watch_now_ms();
-    pthread_mutex_lock(&lock);
+    TLOCK();
     for (GuestThread *t=threads;t && n<WATCH_MAX;t=t->next) {
         if (t->finished) continue;
         rows[n]=(WatchRow){.t=t,.kind=t->wait_kind,.object=t->wait_object,.caller=t->wait_caller,.since=t->wait_since_ms};
         ++n;
     }
-    pthread_mutex_unlock(&lock);
+    TUNLOCK();
 #ifdef _WIN32
     /* Suspend, read, resume without printing or allocating in between (a suspended thread may hold the CRT lock). */
     for (size_t i=0;i<n;++i) {
@@ -579,6 +592,14 @@ static void raw_dump(unsigned long seconds) {
     if (raw_file==INVALID_HANDLE_VALUE) return;
     raw_puts("\r\n=== stall dump @"); raw_dec(num,seconds); raw_puts(num); raw_puts("s ===\r\n");
     LONG n=raw_tid_count; DWORD self=GetCurrentThreadId();
+    /* Thread-list lock: owner (0 = none), line it was taken at, last thread waiting for it, and
+     * the raw winpthread mutex object (state, type, event handle, count, owner). */
+    raw_puts("thread lock: owner tid "); raw_dec(num,lock_owner_tid); raw_puts(num);
+    raw_puts(" line "); raw_dec(num,(unsigned long)lock_owner_line); raw_puts(num);
+    raw_puts(" last waiter tid "); raw_dec(num,lock_waiting_tid); raw_puts(num); raw_puts("\r\n");
+    { uintptr_t mp=*(uintptr_t*)&lock; raw_line("thread lock word=",mp,"");
+      if (mp>0x10000 && !IsBadReadPtr((void*)mp,32)) { for (int k=0;k<4;++k) raw_line(" ",((uintptr_t*)mp)[k],""); }
+      raw_puts("\r\n"); }
     /* Phase 1: suspend, read the register context, resume. Nothing else happens while suspended. */
     for (LONG i=0;i<n;++i) {
         raw_have[i]=0;
