@@ -17,6 +17,7 @@
 #include <unistd.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <tlhelp32.h>
 #else
 #include <sys/syscall.h>
 #include <sys/mman.h>
@@ -519,9 +520,124 @@ static void *watch_main(void *unused) {
     }
     return NULL;
 }
+
+#ifdef _WIN32
+/* ---- lock-free stall dump (PS4RT_HANG_WATCH=1) ------------------------------------------------
+ * The regular watch_dump() prints through the CRT and takes the thread-list lock, so it cannot
+ * report when the stall itself holds one of those. This dumper uses only kernel calls, static
+ * buffers and WriteFile. A lister thread keeps the thread-id and module lists current while the
+ * process is healthy; the dumper reads those lists, captures every thread (host threads
+ * included), and writes raw addresses first, then unwound frames, then module+offset. */
+#define RAW_MAX_THREADS 384
+#define RAW_MAX_MODS 192
+#define RAW_FRAMES 20
+typedef struct { uintptr_t base; size_t size; char name[64]; } RawMod;
+static volatile LONG raw_tid_count;
+static DWORD raw_tids[RAW_MAX_THREADS];
+static RawMod raw_mods[RAW_MAX_MODS];
+static volatile LONG raw_mod_count;
+static CONTEXT raw_ctx[RAW_MAX_THREADS];
+static unsigned char raw_have[RAW_MAX_THREADS];
+static char raw_path[MAX_PATH];
+static HANDLE raw_file=INVALID_HANDLE_VALUE;
+static void raw_puts(const char *s){ DWORD w; if (raw_file!=INVALID_HANDLE_VALUE) WriteFile(raw_file,s,(DWORD)lstrlenA(s),&w,NULL); }
+static void raw_hex(char *out,uintptr_t v){ static const char d[]="0123456789abcdef"; for (int i=15;i>=0;--i){out[i]=d[v&15];v>>=4;} out[16]=0; }
+static void raw_dec(char *out,unsigned long v){ char t[24]; int n=0; do{t[n++]=(char)('0'+v%10);v/=10;}while(v); for(int i=0;i<n;++i) out[i]=t[n-1-i]; out[n]=0; }
+static void raw_line(const char *a,uintptr_t v,const char *b){ char h[20]; raw_hex(h,v); raw_puts(a); raw_puts(h); raw_puts(b); }
+static void raw_where(uintptr_t pc){
+    char h[20]; raw_hex(h,pc); raw_puts("    "); raw_puts(h);
+    LONG n=raw_mod_count;
+    for (LONG i=0;i<n;++i) if (pc>=raw_mods[i].base && pc<raw_mods[i].base+raw_mods[i].size) {
+        raw_puts("  "); raw_puts(raw_mods[i].name); raw_puts("+0x"); raw_hex(h,pc-raw_mods[i].base); raw_puts(h); break;
+    }
+    if (runtime_image_base && pc>=runtime_image_base && pc<runtime_image_base+0x4000000) { raw_puts("  guest+0x"); raw_hex(h,pc-runtime_image_base); raw_puts(h); }
+    raw_puts("\r\n");
+}
+static DWORD WINAPI raw_lister(LPVOID unused) {
+    (void)unused;
+    for (unsigned tick=0;;++tick) {
+        HANDLE s=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0);
+        if (s!=INVALID_HANDLE_VALUE) {
+            THREADENTRY32 te; te.dwSize=sizeof te; LONG n=0; DWORD pid=GetCurrentProcessId();
+            if (Thread32First(s,&te)) do { if (te.th32OwnerProcessID==pid && n<RAW_MAX_THREADS) raw_tids[n++]=te.th32ThreadID; } while (Thread32Next(s,&te));
+            raw_tid_count=n; CloseHandle(s);
+        }
+        if (tick%4==0) {
+            HANDLE m=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());
+            if (m!=INVALID_HANDLE_VALUE) {
+                MODULEENTRY32 me; me.dwSize=sizeof me; LONG n=0;
+                if (Module32First(m,&me)) do { if (n<RAW_MAX_MODS) { raw_mods[n].base=(uintptr_t)me.modBaseAddr; raw_mods[n].size=me.modBaseSize; lstrcpynA(raw_mods[n].name,me.szModule,sizeof raw_mods[n].name); ++n; } } while (Module32Next(m,&me));
+                raw_mod_count=n; CloseHandle(m);
+            }
+        }
+        Sleep(1000);
+    }
+    return 0;
+}
+static void raw_dump(unsigned long seconds) {
+    char num[24];
+    if (raw_file==INVALID_HANDLE_VALUE) return;
+    raw_puts("\r\n=== stall dump @"); raw_dec(num,seconds); raw_puts(num); raw_puts("s ===\r\n");
+    LONG n=raw_tid_count; DWORD self=GetCurrentThreadId();
+    /* Phase 1: suspend, read the register context, resume. Nothing else happens while suspended. */
+    for (LONG i=0;i<n;++i) {
+        raw_have[i]=0;
+        if (raw_tids[i]==self) continue;
+        HANDLE h=OpenThread(THREAD_SUSPEND_RESUME|THREAD_GET_CONTEXT|THREAD_QUERY_INFORMATION,FALSE,raw_tids[i]);
+        if (!h) continue;
+        if (SuspendThread(h)!=(DWORD)-1) {
+            raw_ctx[i].ContextFlags=CONTEXT_CONTROL|CONTEXT_INTEGER;
+            if (GetThreadContext(h,&raw_ctx[i])) raw_have[i]=1;
+            ResumeThread(h);
+        }
+        CloseHandle(h);
+    }
+    /* Phase 2: raw RIP/RSP for every thread, before any unwinding that could block. */
+    for (LONG i=0;i<n;++i) {
+        if (!raw_have[i]) continue;
+        raw_dec(num,raw_tids[i]); raw_puts("tid "); raw_puts(num);
+        raw_line(" rip=",(uintptr_t)raw_ctx[i].Rip," rsp="); raw_line("",(uintptr_t)raw_ctx[i].Rsp,"\r\n");
+    }
+    /* Phase 3: unwound frames with module+offset. */
+    for (LONG i=0;i<n;++i) {
+        if (!raw_have[i]) continue;
+        raw_dec(num,raw_tids[i]); raw_puts("-- tid "); raw_puts(num); raw_puts("\r\n");
+        CONTEXT c=raw_ctx[i];
+        for (int f=0;f<RAW_FRAMES;++f) {
+            uintptr_t pc=(uintptr_t)c.Rip;
+            if (!pc) break;
+            raw_where(pc);
+            ULONG64 base=0; PRUNTIME_FUNCTION rf=RtlLookupFunctionEntry(pc,&base,NULL);
+            if (rf) { PVOID hd=NULL; ULONG64 ef=0; RtlVirtualUnwind(0,base,pc,rf,&c,&hd,&ef,NULL); }
+            else { if (IsBadReadPtr((void*)(uintptr_t)c.Rsp,8)) break; c.Rip=*(ULONG64*)(uintptr_t)c.Rsp; c.Rsp+=8; }
+        }
+    }
+    raw_puts("=== end ===\r\n");
+}
+static DWORD WINAPI raw_dumper(LPVOID unused) {
+    (void)unused;
+    static const unsigned long at[]={10,20,40,80};
+    unsigned long elapsed=0;
+    for (size_t i=0;i<sizeof(at)/sizeof(*at);++i) { Sleep((DWORD)((at[i]-elapsed)*1000)); elapsed=at[i]; raw_dump(elapsed); }
+    return 0;
+}
+static void raw_watch_start(void) {
+    DWORD n=GetCurrentDirectoryA(sizeof raw_path-32,raw_path);
+    if (!n || n>=sizeof raw_path-32) return;
+    lstrcatA(raw_path,"\\ps4rt_stall_dump.txt");
+    raw_file=CreateFileA(raw_path,FILE_APPEND_DATA,FILE_SHARE_READ,NULL,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if (raw_file==INVALID_HANDLE_VALUE) return;
+    printf("Hang watch: lock-free stall dump file %s\n",raw_path);
+    CreateThread(NULL,0,raw_lister,NULL,0,NULL);
+    CreateThread(NULL,0,raw_dumper,NULL,0,NULL);
+}
+#endif
 void runtime_watch_start(void) {
     const char *on=getenv("PS4RT_HANG_WATCH");
     if (!on || *on!='1') return;
+#ifdef _WIN32
+    raw_watch_start();
+#endif
     pthread_t th;
     if (!pthread_create(&th,NULL,watch_main,NULL)) pthread_detach(th);
 }
