@@ -1247,12 +1247,49 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     // ps4rt: queued commands (non-EOP flips) run on this thread and are what
                     // clears the label, so they must be served while waiting.
                     PS4RT_LOADING_EVENT(PS4RT_LOAD_VO_WAIT, wait_addr, wait_reg_mem->ref);
+                    // ps4rt: a boot stall was caught here (render thread waiting for the GPU to
+                    // go idle, this thread waiting for a flip that is only submitted after).
+                    // Log the video-out state after 3 s; after 8 s leave the wait (the flip that
+                    // would end it can no longer arrive) so the game goes on.
+                    const auto vo_wait_start = std::chrono::steady_clock::now();
+                    bool vo_logged = false;
                     while (true) {
-                        vo_port->WaitVoLabel([&] {
+                        vo_port->WaitVoLabelFor(std::chrono::milliseconds(250), [&] {
                             return wait_reg_mem->Test(regs.reg_array) || num_commands != 0;
                         });
                         if (wait_reg_mem->Test(regs.reg_array)) {
                             break;
+                        }
+                        if (num_commands == 0) {
+                            const auto waited = std::chrono::steady_clock::now() - vo_wait_start;
+                            if (!vo_logged && waited > std::chrono::seconds(3)) {
+                                vo_logged = true;
+                                std::printf("VO wait stuck 3 s: label %td value %llu func %u ref %u "
+                                            "mask %#x | prev_index %d flips %llu pending %d "
+                                            "gc_queue %d flip_rate %d vblanks %llu | labels",
+                                            wait_addr - &vo_port->buffer_labels[0],
+                                            (unsigned long long)*wait_addr,
+                                            (unsigned)wait_reg_mem->function.Value(),
+                                            wait_reg_mem->ref, wait_reg_mem->mask,
+                                            vo_port->prev_index,
+                                            (unsigned long long)vo_port->flip_status.count,
+                                            (int)vo_port->flip_status.flip_pending_num,
+                                            (int)vo_port->flip_status.gc_queue_num,
+                                            vo_port->flip_rate,
+                                            (unsigned long long)vo_port->vblank_status.count);
+                                for (size_t i = 0; i < 8; ++i) {
+                                    std::printf(" %llu",
+                                                (unsigned long long)vo_port->buffer_labels[i]);
+                                }
+                                std::printf("\n");
+                                std::fflush(stdout);
+                            }
+                            if (waited > std::chrono::seconds(8)) {
+                                std::printf("VO wait forced open after 8 s (label %td)\n",
+                                            wait_addr - &vo_port->buffer_labels[0]);
+                                std::fflush(stdout);
+                                break;
+                            }
                         }
                         ProcessCommands();
                     }

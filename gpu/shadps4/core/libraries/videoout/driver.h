@@ -58,6 +58,14 @@ struct VideoOutPort {
         vo_cv.wait(lk, pred);
     }
 
+    /// ps4rt: timed variant (the GPU thread logs and, as a last resort, leaves a wait that no
+    /// flip can ever end). Returns the predicate's result.
+    template <class Rep, class Period>
+    bool WaitVoLabelFor(const std::chrono::duration<Rep, Period>& timeout, auto&& pred) {
+        std::unique_lock lk{vo_mutex};
+        return vo_cv.wait_for(lk, timeout, pred);
+    }
+
     void SignalVoLabel() {
         std::scoped_lock lk{vo_mutex};
         vo_cv.notify_all();
