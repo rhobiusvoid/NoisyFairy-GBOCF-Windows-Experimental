@@ -622,6 +622,17 @@ static void raw_mutex(const char *name,void *m) {
     }
     raw_puts("\r\n");
 }
+int ps4rt_ult_snapshot(int i,const char **name,unsigned *count,unsigned *cap,unsigned *waiters,unsigned long *np,unsigned long *nq,void **q);
+static void raw_ult(void) {
+    char num[24]; const char *nm; unsigned c,cp,w; unsigned long np,nq; void *q;
+    for (int i=0;ps4rt_ult_snapshot(i,&nm,&c,&cp,&w,&np,&nq,&q);++i) {
+        raw_puts("ult queue "); raw_puts(nm); raw_line(" @",(uintptr_t)q," count ");
+        raw_dec(num,c); raw_puts(num); raw_puts("/"); raw_dec(num,cp); raw_puts(num);
+        raw_puts(" waiters "); raw_dec(num,w); raw_puts(num);
+        raw_puts(" pushed "); raw_dec(num,np); raw_puts(num);
+        raw_puts(" popped "); raw_dec(num,nq); raw_puts(num); raw_puts("\r\n");
+    }
+}
 static void raw_dump(unsigned long seconds) {
     char num[24];
     if (raw_file==INVALID_HANDLE_VALUE) return;
@@ -633,6 +644,7 @@ static void raw_dump(unsigned long seconds) {
     raw_puts(" line "); raw_dec(num,(unsigned long)lock_owner_line); raw_puts(num);
     raw_puts(" last waiter tid "); raw_dec(num,lock_waiting_tid); raw_puts(num); raw_puts("\r\n");
     raw_mutex("thread lock",&lock);
+    raw_ult();
     for (LONG k=0;k<watch_mutex_count;++k) raw_mutex(watch_mutexes[k].name,watch_mutexes[k].m);
     /* Phase 1: suspend, read the register context, resume. Nothing else happens while suspended. */
     for (LONG i=0;i<n;++i) {

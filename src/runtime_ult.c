@@ -30,9 +30,17 @@ typedef struct { uint32_t capacity,size; } DataPool;
 typedef struct {
     pthread_mutex_t lock; pthread_cond_t ready;
     DataPool *pool; unsigned char *slots; uint32_t head,count,size,capacity,base_capacity;
+    uint32_t waiters; char name[40]; unsigned long npush,npop;
     uint32_t busy_streak; /* consecutive full pushes; the game retries every 100 us */
 } Queue;
 static unsigned long pools_created, queues_created, pushes, pops;
+#define ULT_REG 64
+static Queue *ult_reg[ULT_REG];
+/* Lock-free snapshot for the stall dump: returns 0 when index is past the last queue. */
+int ps4rt_ult_snapshot(int i,const char **name,unsigned *count,unsigned *cap,unsigned *waiters,unsigned long *np,unsigned long *nq,void **q) {
+    if (i<0||i>=ULT_REG||!ult_reg[i]) return 0;
+    Queue *k=ult_reg[i]; *name=k->name; *count=k->count; *cap=k->capacity; *waiters=k->waiters; *np=k->npush; *nq=k->npop; *q=k; return 1;
+}
 
 #if PS4RT_DIAGNOSTICS && !defined(_WIN32)
 /* Ring of recent queue operations, readable from a hung process (symbol
@@ -88,6 +96,8 @@ static ABI int32_t queue_create(Handle *h,const char *name,uint32_t size,Handle 
     q->slots=calloc(pool->capacity,size);
     if (!q->slots) { free(q); return ULT_INVALID; }
     pthread_mutex_init(&q->lock,NULL); pthread_cond_init(&q->ready,NULL);
+    if (name) { strncpy(q->name,name,sizeof(q->name)-1); }
+    for (int i=0;i<ULT_REG;++i) if (!ult_reg[i]) { ult_reg[i]=q; break; }
     q->pool=pool; q->size=size; q->capacity=q->base_capacity=pool->capacity;
     h->magic=MAGIC_QUEUE; h->host=q; ++queues_created;
     PS4RT_LOADING_NOTE("queue-create host=%p guest=%p name=%s capacity=%u size=%u",
@@ -97,6 +107,7 @@ static ABI int32_t queue_create(Handle *h,const char *name,uint32_t size,Handle 
 static ABI int32_t queue_destroy(Handle *h) {
     if (!valid(h,MAGIC_QUEUE)) return ULT_INVALID;
     Queue *q=h->host; h->host=NULL; h->magic=0;
+    for (int i=0;i<ULT_REG;++i) if (ult_reg[i]==q) ult_reg[i]=NULL;
     PS4RT_LOADING_NOTE("queue-destroy host=%p guest=%p", (void*)q, (void*)h);
     pthread_mutex_destroy(&q->lock); pthread_cond_destroy(&q->ready);
     free(q->slots); free(q); return 0;
@@ -127,7 +138,7 @@ static ABI int32_t queue_push(Handle *h,const void *data) {
     else {
         q->busy_streak=0;
         memcpy(q->slots+(size_t)((q->head+q->count)%q->capacity)*q->size,data,q->size);
-        ++q->count; ++pushes; pthread_cond_signal(&q->ready);
+        ++q->count; ++pushes; ++q->npush; pthread_cond_signal(&q->ready);
     }
     trace(TR_PUSH,q,result);
     PS4RT_LOADING_EVENT(PS4RT_LOAD_ULT_PUSH, q, result);
@@ -148,12 +159,14 @@ static int32_t take(Handle *h,void *out,int wait) {
         PS4RT_LOADING_EVENT(PS4RT_LOAD_ULT_WAIT, q, 0);
     }
     if (!q->count && wait) runtime_wait_begin("ult-queue",q,__builtin_return_address(0));
+    ++q->waiters;
     while (!q->count && wait) pthread_cond_wait(&q->ready,&q->lock);
+    --q->waiters;
     if (wait) runtime_wait_end();
     if (!q->count) result=ULT_EMPTY;
     else {
         memcpy(out,q->slots+(size_t)q->head*q->size,q->size);
-        q->head=(q->head+1)%q->capacity; --q->count; ++pops;
+        q->head=(q->head+1)%q->capacity; --q->count; ++pops; ++q->npop;
     }
     trace(wait?TR_POP_DONE:TR_TRY_POP,q,result);
     if (!result) PS4RT_LOADING_EVENT(PS4RT_LOAD_ULT_POP, q, 0);
