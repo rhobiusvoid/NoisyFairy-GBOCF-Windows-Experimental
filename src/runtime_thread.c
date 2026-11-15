@@ -633,6 +633,21 @@ static void raw_ult(void) {
         raw_puts(" popped "); raw_dec(num,nq); raw_puts(num); raw_puts("\r\n");
     }
 }
+static void raw_bytes(const char *label,uintptr_t a,int n) {
+    char h[20]; static const char d[]="0123456789abcdef";
+    raw_puts("  "); raw_puts(label); raw_line(" @",a,": ");
+    if (!a || IsBadReadPtr((void*)a,(UINT_PTR)n)) { raw_puts("unreadable\r\n"); return; }
+    for (int i=0;i<n;++i) { unsigned char b=((unsigned char*)a)[i]; char t[3]={d[b>>4],d[b&15],0}; raw_puts(t); }
+    (void)h; raw_puts("\r\n");
+}
+/* Guest-code spinner: registers, code bytes around RIP, and 32 bytes behind each pointer register. */
+static void raw_guest_state(CONTEXT *c) {
+    raw_bytes("code rip-48",(uintptr_t)c->Rip-48,112);
+    raw_bytes("stack",(uintptr_t)c->Rsp,64);
+    struct { const char *n; ULONG64 v; } r[]={{"rax",c->Rax},{"rcx",c->Rcx},{"rdx",c->Rdx},{"rbx",c->Rbx},{"rbp",c->Rbp},{"rsi",c->Rsi},{"rdi",c->Rdi},
+        {"r8",c->R8},{"r9",c->R9},{"r10",c->R10},{"r11",c->R11},{"r12",c->R12},{"r13",c->R13},{"r14",c->R14},{"r15",c->R15}};
+    for (size_t k=0;k<sizeof r/sizeof *r;++k) { raw_puts("  "); raw_puts(r[k].n); raw_line("=",(uintptr_t)r[k].v,""); raw_bytes(" ->",(uintptr_t)r[k].v,32); }
+}
 static void raw_dump(unsigned long seconds) {
     char num[24];
     if (raw_file==INVALID_HANDLE_VALUE) return;
@@ -664,6 +679,7 @@ static void raw_dump(unsigned long seconds) {
         if (!raw_have[i]) continue;
         raw_dec(num,raw_tids[i]); raw_puts("tid "); raw_puts(num);
         raw_line(" rip=",(uintptr_t)raw_ctx[i].Rip," rsp="); raw_line("",(uintptr_t)raw_ctx[i].Rsp,"\r\n");
+        if (runtime_image_base && raw_ctx[i].Rip>=runtime_image_base && raw_ctx[i].Rip<runtime_image_base+0x4000000) raw_guest_state(&raw_ctx[i]);
     }
     /* Phase 3: unwound frames with module+offset. */
     for (LONG i=0;i<n;++i) {
