@@ -534,6 +534,14 @@ static void *watch_main(void *unused) {
     return NULL;
 }
 
+/* Mutexes the stall dump prints raw (name, address of the pthread_mutex_t / std::mutex). */
+#define WATCH_MUTEXES 24
+static struct { const char *name; void *m; } watch_mutexes[WATCH_MUTEXES];
+static volatile LONG watch_mutex_count;
+void ps4rt_watch_mutex(const char *name,void *m) {
+    LONG i=watch_mutex_count;
+    if (i<WATCH_MUTEXES) { watch_mutexes[i].name=name; watch_mutexes[i].m=m; watch_mutex_count=i+1; }
+}
 #ifdef _WIN32
 /* ---- lock-free stall dump (PS4RT_HANG_WATCH=1) ------------------------------------------------
  * The regular watch_dump() prints through the CRT and takes the thread-list lock, so it cannot
@@ -587,6 +595,33 @@ static DWORD WINAPI raw_lister(LPVOID unused) {
     }
     return 0;
 }
+/* Raw state of a winpthread mutex: the pointer word, then its object (state, type, event handle,
+ * count, owner) and what the event handle really is (an Event, or something a stray CloseHandle
+ * left behind). */
+typedef struct { USHORT Length, MaximumLength; PWSTR Buffer; } RawUStr;
+typedef LONG (NTAPI *RawNtQueryObject)(HANDLE,int,PVOID,ULONG,PULONG);
+static void raw_mutex(const char *name,void *m) {
+    char num[24];
+    raw_puts("mutex "); raw_puts(name); raw_line(" @",(uintptr_t)m," word=");
+    uintptr_t mp=*(uintptr_t*)m; raw_line("",mp,"");
+    if (mp>0x10000 && !IsBadReadPtr((void*)mp,24)) {
+        uint32_t *w=(uint32_t*)mp;
+        raw_puts(" state "); raw_dec(num,w[0]); raw_puts(num);
+        raw_puts(" type "); raw_dec(num,w[1]); raw_puts(num);
+        uintptr_t h=*(uintptr_t*)(mp+8); raw_line(" event=",h,"");
+        raw_puts(" count "); raw_dec(num,w[4]); raw_puts(num);
+        raw_puts(" owner "); raw_dec(num,w[5]); raw_puts(num);
+        if (h) {
+            static RawNtQueryObject q; if (!q) q=(RawNtQueryObject)(void*)GetProcAddress(GetModuleHandleA("ntdll.dll"),"NtQueryObject");
+            static unsigned char buf[256]; ULONG got=0;
+            if (q && q((HANDLE)h,2,buf,sizeof buf,&got)>=0) {
+                RawUStr *u=(RawUStr*)buf; raw_puts(" handle type ");
+                for (int i=0;i<u->Length/2 && i<24;++i) { char c[2]={(char)u->Buffer[i],0}; raw_puts(c); }
+            } else raw_puts(" handle INVALID");
+        }
+    }
+    raw_puts("\r\n");
+}
 static void raw_dump(unsigned long seconds) {
     char num[24];
     if (raw_file==INVALID_HANDLE_VALUE) return;
@@ -597,9 +632,8 @@ static void raw_dump(unsigned long seconds) {
     raw_puts("thread lock: owner tid "); raw_dec(num,lock_owner_tid); raw_puts(num);
     raw_puts(" line "); raw_dec(num,(unsigned long)lock_owner_line); raw_puts(num);
     raw_puts(" last waiter tid "); raw_dec(num,lock_waiting_tid); raw_puts(num); raw_puts("\r\n");
-    { uintptr_t mp=*(uintptr_t*)&lock; raw_line("thread lock word=",mp,"");
-      if (mp>0x10000 && !IsBadReadPtr((void*)mp,32)) { for (int k=0;k<4;++k) raw_line(" ",((uintptr_t*)mp)[k],""); }
-      raw_puts("\r\n"); }
+    raw_mutex("thread lock",&lock);
+    for (LONG k=0;k<watch_mutex_count;++k) raw_mutex(watch_mutexes[k].name,watch_mutexes[k].m);
     /* Phase 1: suspend, read the register context, resume. Nothing else happens while suspended. */
     for (LONG i=0;i<n;++i) {
         raw_have[i]=0;

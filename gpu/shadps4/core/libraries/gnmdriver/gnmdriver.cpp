@@ -2951,6 +2951,8 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
         liverpool->ReserveCopyBufferSpace();
     }
 
+    ps4rt_watch_mutex("gnm_submit_lock", &m_submit_lock);
+    ps4rt_watch_mutex("gnm_wait_idle", &m_wait_idle);
     Platform::IrqC::Instance()->Register(Platform::InterruptId::GpuIdle, ResetSubmissionLock,
                                          nullptr);
 

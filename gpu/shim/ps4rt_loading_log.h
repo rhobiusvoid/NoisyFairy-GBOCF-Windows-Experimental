@@ -17,6 +17,9 @@ enum Ps4RtLoadingKind {
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* ps4rt: registers a host mutex (the std::mutex object's address) so the lock-free stall dump can
+ * print its raw state. Defined by the runtime. */
+void ps4rt_watch_mutex(const char* name, void* mutex);
 #if PS4RT_DIAGNOSTICS && !defined(_WIN32)
 void ps4rt_loading_start(const char* user_dir) __attribute__((weak));
 void ps4rt_loading_event(unsigned kind, uintptr_t object, int64_t detail,

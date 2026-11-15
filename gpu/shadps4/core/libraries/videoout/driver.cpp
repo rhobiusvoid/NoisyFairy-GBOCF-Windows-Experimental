@@ -72,6 +72,10 @@ constexpr u32 PixelFormatBpp(PixelFormat pixel_format) {
 }
 
 VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
+    ps4rt_watch_mutex("vo_mutex", &main_port.vo_mutex);
+    ps4rt_watch_mutex("vo_port_mutex", &main_port.port_mutex);
+    ps4rt_watch_mutex("vo_requests_mutex", &mutex);
+    ps4rt_watch_mutex("vo_swap_mutex", &swap_mutex);
     main_port.resolution.full_width = width;
     main_port.resolution.full_height = height;
     main_port.resolution.pane_width = width;
