@@ -788,6 +788,8 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             }
             const auto& wf = wp.GetFetchShader();
             if (wf.has_value() != sel.fetch_shader.has_value()) {
+                std::printf("WarmVerify %#llx: fetch warm=%d live=%d\n", (unsigned long long)hash,
+                            (int)wf.has_value(), (int)sel.fetch_shader.has_value());
                 report("fetch shader presence");
             } else if (wf && !(*wf == *sel.fetch_shader)) {
                 report("fetch shader contents");

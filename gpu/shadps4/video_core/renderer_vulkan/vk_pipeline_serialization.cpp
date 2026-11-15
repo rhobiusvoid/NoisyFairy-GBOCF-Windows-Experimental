@@ -1296,7 +1296,12 @@ void PipelineCache::PumpWarmUp() {
                 usable = stage.info != nullptr;
                 infos[i] = stage.info;
                 modules[i] = stage.result;
-                fetch = stage.fetch; // the blocking load keeps the last stage's too
+                // Same rule as the live path: only a stage that has a fetch shader sets it.
+                // (Overwriting unconditionally let a later stage without one erase the vertex
+                // stage's, so warm-built pipelines drew with no vertex attributes.)
+                if (stage.fetch) {
+                    fetch = stage.fetch;
+                }
             }
         }
         if (!usable) {
