@@ -73,9 +73,19 @@ static volatile unsigned long lock_waiting_tid;
 #else
 #define LOCK_TID() ((unsigned long)(uintptr_t)pthread_self())
 #endif
+#ifdef _WIN32
+/* Windows: an SRWLOCK, not a winpthread mutex. Two boot stalls (dd14 dump) had the main thread and
+ * the hang watcher blocked on this lock while it was free (waiter flag set, nobody owning it, event
+ * handle valid), i.e. winpthread lost a wake-up. SRWLOCK is kernel-assisted and needs no init. */
+static SRWLOCK tlock=SRWLOCK_INIT;
+#define TLOCK() do { lock_waiting_tid=LOCK_TID(); AcquireSRWLockExclusive(&tlock); lock_waiting_tid=0; \
+    lock_owner_tid=LOCK_TID(); lock_owner_line=__LINE__; } while (0)
+#define TUNLOCK() do { lock_owner_tid=0; ReleaseSRWLockExclusive(&tlock); } while (0)
+#else
 #define TLOCK() do { lock_waiting_tid=LOCK_TID(); pthread_mutex_lock(&lock); lock_waiting_tid=0; \
     lock_owner_tid=LOCK_TID(); lock_owner_line=__LINE__; } while (0)
 #define TUNLOCK() do { lock_owner_tid=0; pthread_mutex_unlock(&lock); } while (0)
+#endif
 static ThreadAttr *attributes;
 static GuestThread *threads;
 static _Thread_local GuestThread *current;
@@ -658,7 +668,7 @@ static void raw_dump(unsigned long seconds) {
     raw_puts("thread lock: owner tid "); raw_dec(num,lock_owner_tid); raw_puts(num);
     raw_puts(" line "); raw_dec(num,(unsigned long)lock_owner_line); raw_puts(num);
     raw_puts(" last waiter tid "); raw_dec(num,lock_waiting_tid); raw_puts(num); raw_puts("\r\n");
-    raw_mutex("thread lock",&lock);
+    raw_line("thread SRW lock word=",*(volatile uintptr_t*)&tlock,"\r\n");
     raw_ult();
     for (LONG k=0;k<watch_mutex_count;++k) raw_mutex(watch_mutexes[k].name,watch_mutexes[k].m);
     /* Phase 1: suspend, read the register context, resume. Nothing else happens while suspended. */
