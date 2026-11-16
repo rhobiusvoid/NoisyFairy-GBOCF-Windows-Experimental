@@ -1718,6 +1718,8 @@ void TextureCache::GarbageCollectImages() {
     std::scoped_lock lock{mutex};
     bool pressured = false;
     bool aggresive = false;
+    bool emergency_discard = false;
+    static u64 gc_discards = 0;
     u64 ticks_to_destroy = 0;
     size_t num_deletions = 0;
 
@@ -1740,9 +1742,23 @@ void TextureCache::GarbageCollectImages() {
         const bool tiled = image.info.IsTiled();
         if (tiled && download) {
             // This is a workaround for now. We can't handle non-linear image downloads.
+            // ps4rt: such an image used to cost one deletion from the budget and stay at the
+            // front of the LRU, so once the 40-64 oldest images were all tiled GPU-written ones
+            // (render targets), every pass spent its whole budget on them and freed nothing:
+            // a 4 GB card logged "0 images evicted" over 45000 emergency passes with 1.6 GB of
+            // idle images, then ran out of device memory. Skipped images are free now, and
+            // under emergency pressure an image idle for 120+ ticks is dropped without write-back.
+            if (emergency_discard && gc_tick - image.lru_touched_tick >= 120) {
+                ++gc_discards;
+                ++gc_evictions;
+                FreeImage(image_id);
+                return false;
+            }
+            ++num_deletions;
             return false;
         }
         if (download && !pressured) {
+            ++num_deletions;
             return false;
         }
         if (download) {
@@ -1786,6 +1802,7 @@ void TextureCache::GarbageCollectImages() {
         if (budget_now != 0 && total_used_memory >= budget_now / 100 * 92) {
             pressured = true;
             aggresive = true;
+            emergency_discard = true;
             ticks_to_destroy = std::min<u64>(3, gc_tick);
             num_deletions = 64;
             const u64 before = total_used_memory;
@@ -1800,11 +1817,13 @@ void TextureCache::GarbageCollectImages() {
         const auto now = std::chrono::steady_clock::now();
         if (now - gc_report_time >= std::chrono::seconds(5)) {
             std::printf("Texture cache: memory pressure, %llu of %llu MiB (critical %llu): "
-                        "%llu images evicted, %llu written back since the last report\n",
+                        "%llu images evicted, %llu written back since the last report "
+                        "(%llu GPU-written images dropped without write-back in all)\n",
                         (unsigned long long)(total_used_memory >> 20),
                         (unsigned long long)(pressure_gc_memory >> 20),
                         (unsigned long long)(critical_gc_memory >> 20),
-                        (unsigned long long)gc_evictions, (unsigned long long)gc_downloads);
+                        (unsigned long long)gc_evictions, (unsigned long long)gc_downloads,
+                        (unsigned long long)gc_discards);
             LogMemoryBreakdown();
             gc_report_time = now;
             gc_evictions = gc_downloads = 0;
