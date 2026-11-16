@@ -658,6 +658,23 @@ static void raw_guest_state(CONTEXT *c) {
         {"r8",c->R8},{"r9",c->R9},{"r10",c->R10},{"r11",c->R11},{"r12",c->R12},{"r13",c->R13},{"r14",c->R14},{"r15",c->R15}};
     for (size_t k=0;k<sizeof r/sizeof *r;++k) { raw_puts("  "); raw_puts(r[k].n); raw_line("=",(uintptr_t)r[k].v,""); raw_bytes(" ->",(uintptr_t)r[k].v,32); }
 }
+/* One unwind step with a recovery point: a thread suspended in an odd place (guest frames, a
+ * prologue, a stack being switched) can hand RtlVirtualUnwind a bad context, and the fault inside
+ * ntdll killed the game from the dump thread (two crashes at the 10 s / 40 s dump). Returns 0 when
+ * the step faulted or no unwind data exists (the caller then stops). */
+static int raw_unwind_step(CONTEXT *x) {
+    uintptr_t pc=(uintptr_t)x->Rip;
+    sigjmp_buf recover;
+    if (sigsetjmp(recover,0)) { runtime_fault_recover=NULL; return 0; }
+    runtime_fault_recover=&recover;
+    ULONG64 base=0; PRUNTIME_FUNCTION rf=RtlLookupFunctionEntry(pc,&base,NULL);
+    int ok=1;
+    if (rf) { PVOID hd=NULL; ULONG64 ef=0; RtlVirtualUnwind(0,base,pc,rf,x,&hd,&ef,NULL); }
+    else if (IsBadReadPtr((void*)(uintptr_t)x->Rsp,8)) ok=0;
+    else { x->Rip=*(ULONG64*)(uintptr_t)x->Rsp; x->Rsp+=8; }
+    runtime_fault_recover=NULL;
+    return ok;
+}
 static int raw_in_guest(uintptr_t pc){ return runtime_image_base && pc>=runtime_image_base && pc<runtime_image_base+0x4000000; }
 static int raw_in_mod(uintptr_t pc,const char *name){
     LONG n=raw_mod_count;
@@ -671,9 +688,7 @@ static uintptr_t raw_first_guest(CONTEXT *c) {
         uintptr_t pc=(uintptr_t)x.Rip;
         if (!pc) break;
         if (raw_in_guest(pc)) { *c=x; return pc; }
-        ULONG64 base=0; PRUNTIME_FUNCTION rf=RtlLookupFunctionEntry(pc,&base,NULL);
-        if (rf) { PVOID hd=NULL; ULONG64 ef=0; RtlVirtualUnwind(0,base,pc,rf,&x,&hd,&ef,NULL); }
-        else { if (IsBadReadPtr((void*)(uintptr_t)x.Rsp,8)) break; x.Rip=*(ULONG64*)(uintptr_t)x.Rsp; x.Rsp+=8; }
+        if (!raw_unwind_step(&x)) break;
     }
     return 0;
 }
@@ -751,9 +766,7 @@ static void raw_dump(unsigned long seconds) {
             uintptr_t pc=(uintptr_t)c.Rip;
             if (!pc) break;
             raw_where(pc);
-            ULONG64 base=0; PRUNTIME_FUNCTION rf=RtlLookupFunctionEntry(pc,&base,NULL);
-            if (rf) { PVOID hd=NULL; ULONG64 ef=0; RtlVirtualUnwind(0,base,pc,rf,&c,&hd,&ef,NULL); }
-            else { if (IsBadReadPtr((void*)(uintptr_t)c.Rsp,8)) break; c.Rip=*(ULONG64*)(uintptr_t)c.Rsp; c.Rsp+=8; }
+            if (!raw_unwind_step(&c)) break;
         }
     }
     raw_sample_spinners();
