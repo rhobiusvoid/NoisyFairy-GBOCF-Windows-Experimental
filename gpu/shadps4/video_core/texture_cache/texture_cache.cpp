@@ -1719,6 +1719,7 @@ void TextureCache::GarbageCollectImages() {
     bool pressured = false;
     bool aggresive = false;
     bool emergency_discard = false;
+    u64 discard_floor = 0;
     static u64 gc_discards = 0;
     u64 ticks_to_destroy = 0;
     size_t num_deletions = 0;
@@ -1748,7 +1749,14 @@ void TextureCache::GarbageCollectImages() {
             // a 4 GB card logged "0 images evicted" over 45000 emergency passes with 1.6 GB of
             // idle images, then ran out of device memory. Skipped images are free now, and
             // under emergency pressure an image idle for 120+ ticks is dropped without write-back.
-            if (emergency_discard && gc_tick - image.lru_touched_tick >= 120) {
+            // Dropping loses the image's contents (the game rebuilds them from guest memory the
+            // next time it reads them, which for GPU-composited textures such as the mobile
+            // suits' colour-change textures shows up as rainbow noise). So: only the oldest ones
+            // (the LRU visits oldest first), only 300+ ticks idle, and only until usage is back
+            // under 85% of the budget; the first version dropped up to 64 per pass, 100-250 images
+            // per report, and sirprize saw MS colours go to noise.
+            if (emergency_discard && total_used_memory >= discard_floor &&
+                gc_tick - image.lru_touched_tick >= 300) {
                 ++gc_discards;
                 ++gc_evictions;
                 FreeImage(image_id);
@@ -1803,6 +1811,7 @@ void TextureCache::GarbageCollectImages() {
             pressured = true;
             aggresive = true;
             emergency_discard = true;
+            discard_floor = budget_now / 100 * 85;
             ticks_to_destroy = std::min<u64>(3, gc_tick);
             num_deletions = 64;
             const u64 before = total_used_memory;
