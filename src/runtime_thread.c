@@ -658,6 +658,57 @@ static void raw_guest_state(CONTEXT *c) {
         {"r8",c->R8},{"r9",c->R9},{"r10",c->R10},{"r11",c->R11},{"r12",c->R12},{"r13",c->R13},{"r14",c->R14},{"r15",c->R15}};
     for (size_t k=0;k<sizeof r/sizeof *r;++k) { raw_puts("  "); raw_puts(r[k].n); raw_line("=",(uintptr_t)r[k].v,""); raw_bytes(" ->",(uintptr_t)r[k].v,32); }
 }
+static int raw_in_guest(uintptr_t pc){ return runtime_image_base && pc>=runtime_image_base && pc<runtime_image_base+0x4000000; }
+static int raw_in_mod(uintptr_t pc,const char *name){
+    LONG n=raw_mod_count;
+    for (LONG i=0;i<n;++i) if (pc>=raw_mods[i].base && pc<raw_mods[i].base+raw_mods[i].size) return !lstrcmpiA(raw_mods[i].name,name);
+    return 0;
+}
+/* First guest frame of a context: returns its pc and the rsp/regs at that frame (0 if none). */
+static uintptr_t raw_first_guest(CONTEXT *c) {
+    CONTEXT x=*c;
+    for (int f=0;f<RAW_FRAMES;++f) {
+        uintptr_t pc=(uintptr_t)x.Rip;
+        if (!pc) break;
+        if (raw_in_guest(pc)) { *c=x; return pc; }
+        ULONG64 base=0; PRUNTIME_FUNCTION rf=RtlLookupFunctionEntry(pc,&base,NULL);
+        if (rf) { PVOID hd=NULL; ULONG64 ef=0; RtlVirtualUnwind(0,base,pc,rf,&x,&hd,&ef,NULL); }
+        else { if (IsBadReadPtr((void*)(uintptr_t)x.Rsp,8)) break; x.Rip=*(ULONG64*)(uintptr_t)x.Rsp; x.Rsp+=8; }
+    }
+    return 0;
+}
+/* Threads that are running (rip not in ntdll) with a guest frame: sample them repeatedly, so a guest
+ * loop that spends its time inside host mutex calls shows which guest pcs it cycles through. */
+static void raw_sample_spinners(void) {
+    DWORD cand[4]; int nc=0; LONG n=raw_tid_count; char num[24];
+    for (LONG i=0;i<n && nc<4;++i) {
+        if (!raw_have[i] || raw_in_mod((uintptr_t)raw_ctx[i].Rip,"ntdll.dll")) continue;
+        CONTEXT c=raw_ctx[i];
+        if (raw_first_guest(&c)) cand[nc++]=raw_tids[i];
+    }
+    for (int k=0;k<nc;++k) {
+        raw_puts("spinner sampling tid "); raw_dec(num,cand[k]); raw_puts(num); raw_puts("\r\n");
+        HANDLE h=OpenThread(THREAD_SUSPEND_RESUME|THREAD_GET_CONTEXT|THREAD_QUERY_INFORMATION,FALSE,cand[k]);
+        if (!h) continue;
+        for (int sidx=0;sidx<32;++sidx) {
+            CONTEXT c; c.ContextFlags=CONTEXT_CONTROL|CONTEXT_INTEGER; int ok=0;
+            if (SuspendThread(h)!=(DWORD)-1) { ok=GetThreadContext(h,&c); ResumeThread(h); }
+            if (ok) {
+                uintptr_t pc=raw_first_guest(&c);
+                raw_line("  sample rip=",(uintptr_t)c.Rip," guest pc=");
+                raw_line("",pc," rsp=");
+                raw_line("",(uintptr_t)c.Rsp,"\r\n");
+                if (pc && sidx==0) {
+                    raw_bytes("code pc-64",pc-64,160);
+                    raw_bytes("stack",(uintptr_t)c.Rsp,192);
+                    raw_guest_state(&c);
+                }
+            }
+            Sleep(8);
+        }
+        CloseHandle(h);
+    }
+}
 static void raw_dump(unsigned long seconds) {
     char num[24];
     if (raw_file==INVALID_HANDLE_VALUE) return;
@@ -705,6 +756,7 @@ static void raw_dump(unsigned long seconds) {
             else { if (IsBadReadPtr((void*)(uintptr_t)c.Rsp,8)) break; c.Rip=*(ULONG64*)(uintptr_t)c.Rsp; c.Rsp+=8; }
         }
     }
+    raw_sample_spinners();
     raw_puts("=== end ===\r\n");
 }
 static DWORD WINAPI raw_dumper(LPVOID unused) {
