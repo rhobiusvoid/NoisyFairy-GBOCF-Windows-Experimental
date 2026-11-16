@@ -13,6 +13,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from prepare import load_sfo, prepare
 from link_modules import link
 from content_profile import prepare as prepare_content
@@ -20,6 +21,9 @@ from content_profile import prepare as prepare_content
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == 'nt'
 EXE_SUFFIX = '.exe' if WINDOWS else ''
+# Boot-stall auto-restart (Windows): seconds without the runtime's progress marker, and extra attempts.
+BOOT_STALL_SECONDS = 60
+BOOT_RETRIES = 2
 
 
 def _clear_high_entropy_va(directory):
@@ -56,13 +60,51 @@ def _clear_high_entropy_va(directory):
 def _exec(program, argv, env=None):
     """Replace this process with program (POSIX), or run it to completion and exit with its
     status (Windows has no exec: os.exec* there starts a detached child and returns at once,
-    which would end the launcher window while the game is still starting)."""
+    which would end the launcher window while the game is still starting).
+
+    Windows also restarts the game when a rare boot stall freezes it (black screen, no logo):
+    the runtime creates PS4RT_BOOT_MARKER when the game reaches its first save-data mount, a few
+    seconds after start on a healthy boot. No marker within BOOT_STALL_SECONDS means a stall, and
+    the game is killed and started again (BOOT_RETRIES extra attempts; the last attempt is left
+    running). PS4RT_BOOT_RETRIES=0 turns this off."""
     if not WINDOWS:
         if env is None:
             os.execv(program, argv)
         os.execve(program, argv, env)
     sys.stdout.flush()
-    code = subprocess.call(argv, env=env)
+    try:
+        retries = int(os.environ.get('PS4RT_BOOT_RETRIES', BOOT_RETRIES))
+    except ValueError:
+        retries = BOOT_RETRIES
+    code = 0
+    for attempt in range(retries + 1):
+        run_env = dict(os.environ if env is None else env)
+        marker = None
+        if retries > 0:
+            marker = Path(tempfile.gettempdir()) / f'ps4rt_boot_{os.getpid()}_{attempt}.ok'
+            marker.unlink(missing_ok=True)
+            run_env['PS4RT_BOOT_MARKER'] = str(marker)
+        child = subprocess.Popen(argv, env=run_env)
+        started = time.monotonic()
+        stalled = False
+        while True:
+            code = child.poll()
+            if code is not None:
+                break
+            if (marker is not None and attempt < retries and not marker.exists()
+                    and time.monotonic() - started > BOOT_STALL_SECONDS):
+                stalled = True
+                break
+            time.sleep(0.5)
+        if marker is not None:
+            marker.unlink(missing_ok=True)
+        if not stalled:
+            break
+        print(f'Boot stall: no progress after {BOOT_STALL_SECONDS} s. Restarting the game '
+              f'(attempt {attempt + 2} of {retries + 1}).', flush=True)
+        child.kill()
+        child.wait()
+        time.sleep(1.0)
     if code:
         print(f'ps4rt.exe exited with code {code} (0x{code & 0xffffffff:08X})', file=sys.stderr)
     sys.exit(code)

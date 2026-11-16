@@ -185,6 +185,16 @@ static int32_t mount_impl(int32_t user, const char *title, const DirName *dir, u
     runtime_file_mount(result->point.data,host);
     ++mounts_done;
     pthread_mutex_unlock(&lock);
+    /* Boot-progress marker for the launcher's stall auto-retry: the game gets here a few seconds
+     * after start on every healthy boot, and never in the late-boot stall. */
+    {
+        static int marked;
+        const char *marker=getenv("PS4RT_BOOT_MARKER");
+        if (marker && *marker && !__atomic_exchange_n(&marked,1,__ATOMIC_RELAXED)) {
+            FILE *f=fopen(marker,"wb");
+            if (f) fclose(f);
+        }
+    }
     printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
            exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
     return 0;

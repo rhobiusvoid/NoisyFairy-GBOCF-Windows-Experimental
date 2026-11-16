@@ -57,7 +57,7 @@ See [Running on Windows](docs/RUNNING_WINDOWS.md) for details.
 
 ## Current compatibility status
 
-**Windows port:** tested on Windows 10 with a GTX 1050 Ti. It boots to the main menu and plays through the Chapter 1 tutorial; trophy unlocks no longer crash, and save data loads correctly after restart. Boots on GTX 10-series, RTX 30/50-series and AMD cards (0.5 Beta). A rare, random black-screen stall at boot has been seen; see the note under Download and play. Chapters beyond that and Volume 2/3 are untested on Windows, and the port is still a beta: expect rough edges.
+**Windows port:** tested on Windows 10 with a GTX 1050 Ti. It boots to the main menu and plays through the Chapter 1 tutorial; trophy unlocks no longer crash, and save data loads correctly after restart. Boots on GTX 10-series, RTX 30/50-series and AMD cards (0.6 Beta). A rare, random black-screen stall at boot has been seen; see the note under Download and play. Chapters beyond that and Volume 2/3 are untested on Windows, and the port is still a beta: expect rough edges.
 
 **Original Linux build (by Hekami):** playable and tested through Chapter 9 (Volume 2) on a Radeon 9070XT and Ryzen 9700X, covering the tutorial, story missions, combat and bosses, cutscenes, menus, saving/loading and completion of Volume 1. Volume 3 has not been fully gameplay-tested. Screenshots document a particular configuration, not a performance guarantee.
 
