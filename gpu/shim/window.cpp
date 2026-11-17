@@ -1,4 +1,5 @@
 // ps4rt: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,11 @@
 #include "ps4rt_settings.h"
 
 namespace Frontend {
+
+namespace {
+std::atomic<int> g_ml_want{0}, g_ml_dx{0}, g_ml_dy{0}, g_ml_wheel{0}, g_ml_active{0};
+float g_ml_rx = 0.0f, g_ml_ry = 0.0f; // sub-count remainders, window thread only
+} // namespace
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
@@ -130,6 +136,16 @@ bool WindowSDL::PollEvents() {
     if (const int mode = Ps4RtSettings::Get().display_mode; mode != display_mode) {
         ApplyDisplayMode(mode);
     }
+    {   // Mouse look: capture the cursor only while the game window is focused and nothing else needs it.
+        const bool want = g_ml_want.load() && !Ps4RtOverlay::CapturesInput() && !text_active &&
+                          (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS);
+        if (want != (g_ml_active.load() != 0)) {
+            SDL_SetWindowRelativeMouseMode(window, want);
+            g_ml_active.store(want ? 1 : 0);
+            g_ml_dx = g_ml_dy = g_ml_wheel = 0;
+            g_ml_rx = g_ml_ry = 0.0f;
+        }
+    }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
@@ -159,6 +175,23 @@ bool WindowSDL::PollEvents() {
             UpdateTextTitle();
             continue;
         }
+        if (g_ml_active.load()) {
+            if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                g_ml_rx += event.motion.xrel;
+                g_ml_ry += event.motion.yrel;
+                const int ix = static_cast<int>(g_ml_rx), iy = static_cast<int>(g_ml_ry);
+                g_ml_rx -= ix; g_ml_ry -= iy;
+                g_ml_dx += ix; g_ml_dy += iy;
+                continue;
+            }
+            if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+                g_ml_wheel += event.wheel.y > 0 ? 1 : event.wheel.y < 0 ? -1 : 0;
+                continue;
+            }
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                continue; // buttons are sampled by the pad code
+            }
+        }
         if (Ps4RtOverlay::HandleEvent(event)) {
             continue;
         }
@@ -183,3 +216,9 @@ bool WindowSDL::PollEvents() {
 }
 
 } // namespace Frontend
+
+extern "C" void ps4rtgpu_mouse_look_set(int on) { Frontend::g_ml_want.store(on ? 1 : 0); }
+extern "C" int ps4rtgpu_mouse_look_active(void) { return Frontend::g_ml_active.load(); }
+extern "C" void ps4rtgpu_mouse_look_take(int *dx, int *dy, int *wheel) {
+    *dx = Frontend::g_ml_dx.exchange(0); *dy = Frontend::g_ml_dy.exchange(0); *wheel = Frontend::g_ml_wheel.exchange(0);
+}

@@ -35,6 +35,12 @@ int ps4rtgpu_choice_begin(const char *title, const char *const *items, const cha
 int ps4rtgpu_choice_poll(void);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int ps4rtgpu_overlay_captures_input(void);
+/* Mouse look: the pad code asks for the cursor to be captured (relative mode) while the game
+ * window has focus and no overlay/text dialog is open; take() returns the raw counts and wheel
+ * ticks gathered since the last call. active() is 1 while the mouse is captured. */
+void ps4rtgpu_mouse_look_set(int on);
+int ps4rtgpu_mouse_look_active(void);
+void ps4rtgpu_mouse_look_take(int *dx, int *dy, int *wheel);
 /* A movie frame was delivered (title movie hooks): a 30 fps limit is lifted while movies play,
  * since they are encoded at 60 and a 30 fps present drops every other frame. */
 void ps4rtgpu_movie_frame(void);

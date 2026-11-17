@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <pthread.h>
 #include <time.h>
 #include <SDL3/SDL.h>
@@ -243,6 +244,162 @@ static void load_button_maps(void) {
     if (pad || keys) printf("Runtime: pad map: %d gamepad and %d keyboard buttons remapped\n",pad,keys);
 }
 
+
+/* ---- Mouse look -------------------------------------------------------------------------------
+ * ps4rt_mouse.ini (next to ps4rt.ini, created with defaults on first use, re-read when edited):
+ *   mouse_look=1        0 = mouse not used. F8 releases/captures the cursor while playing.
+ *   mouse_turn_x=1500   mouse counts per second the MS turns at full stick (turn-speed cap), yaw
+ *   mouse_turn_y=1500   same for pitch
+ *   mouse_sens=1.0      scales mouse counts entering the queue (1.0 = 1 count -> 1 queued count)
+ *   mouse_decay=1.0     seconds; the queued movement fades with this time constant (0 = never)
+ *   mouse_deadzone=0.08 stick deflection that just starts the camera turning (game dead zone)
+ *   mouse_queue_cap=0   largest queue in counts (0 = unlimited)
+ *   mouse_invert_y=0
+ *   mouse_left/right/middle/x1/x2/wheel_up/wheel_down=<ps4 button name or empty>
+ * Model: mouse counts add to a queue per axis; each poll the stick is deflected as far as needed to
+ * drain the queue within the poll, capped at full stick (so a big flick turns at the MS's maximum
+ * speed until the queue is empty, a small one turns proportionally); the queue loses what the
+ * camera turned and fades by mouse_decay. */
+typedef struct {
+    int look; float turn_x, turn_y, sens, decay, deadzone, cap; int invert_y;
+    uint32_t btn[7]; /* left right middle x1 x2 wheel_up wheel_down */
+} MouseCfg;
+static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.08f,0,0,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
+static const char *mouse_names[7]={"mouse_left","mouse_right","mouse_middle","mouse_x1","mouse_x2","mouse_wheel_up","mouse_wheel_down"};
+
+static const char *mouse_ini_path(void) {
+    static char path[1024];
+    if (path[0]) return path;
+    const char *cfg=getenv("PS4RT_CONFIG");
+    snprintf(path,sizeof(path),"%s",cfg && *cfg ? cfg : "ps4rt.ini");
+    char *slash=strrchr(path,'/'); char *bs=strrchr(path,'\\');
+    if (bs>slash) slash=bs;
+    if (slash) snprintf(slash+1,sizeof(path)-(size_t)(slash+1-path),"ps4rt_mouse.ini");
+    else snprintf(path,sizeof(path),"ps4rt_mouse.ini");
+    return path;
+}
+static uint32_t ps_by_name(const char *name) {
+    for (size_t i=0;i<sizeof(ps_names)/sizeof(*ps_names);++i) if (!SDL_strcasecmp(name,ps_names[i].name)) return ps_names[i].ps;
+    return 0;
+}
+static void mouse_write_default(const char *path) {
+    FILE *f=fopen(path,"w");
+    if (!f) return;
+    fprintf(f,"# Mouse look settings (edit while the game runs; changes apply within a second).\n"
+              "# F8 releases / recaptures the mouse. Buttons take: cross circle square triangle l1 r1 l2 r2 l3 r3 options\n"
+              "# touchpad_left touchpad_right up down left right, or nothing.\n"
+              "mouse_look=1\n"
+              "# counts per second the camera turns at full stick (the MS turn speed cap)\n"
+              "mouse_turn_x=1500\nmouse_turn_y=1500\n"
+              "# multiplies mouse counts added to the turn queue\n"
+              "mouse_sens=1.0\n"
+              "# queued turning fades with this time constant in seconds (0 = never fades)\n"
+              "mouse_decay=1.0\n"
+              "# stick deflection at which the game starts turning (0 - 0.5)\n"
+              "mouse_deadzone=0.08\n"
+              "# largest queue in counts, 0 = unlimited\n"
+              "mouse_queue_cap=0\nmouse_invert_y=0\n"
+              "mouse_left=r2\nmouse_right=l2\nmouse_middle=r3\nmouse_x1=l1\nmouse_x2=r1\nmouse_wheel_up=\nmouse_wheel_down=\n");
+    fclose(f);
+}
+static void mouse_load(void) {
+    static uint64_t last_check; static long long mtime_key=-1; static bool created;
+    const uint64_t now=now_us();
+    if (now-last_check<1000000 && last_check) return;
+    last_check=now;
+    const char *path=mouse_ini_path();
+    struct stat st;
+    if (stat(path,&st)!=0) {
+        if (created) return;
+        created=true; mouse_write_default(path);
+        if (stat(path,&st)!=0) return;
+    }
+    const long long key=(long long)st.st_mtime*1000003LL+(long long)st.st_size;
+    if (key==mtime_key) return;
+    mtime_key=key;
+    FILE *f=fopen(path,"r");
+    if (!f) return;
+    MouseCfg c=mcfg; char line[256];
+    while (fgets(line,sizeof(line),f)) {
+        char *t=trim(line);
+        if (!*t || *t=='#' || *t==';') continue;
+        char *eq=strchr(t,'='); if (!eq) continue;
+        *eq=0; const char *k=trim(t), *v=trim(eq+1);
+        if (!strcmp(k,"mouse_look")) c.look=atoi(v);
+        else if (!strcmp(k,"mouse_turn_x")) c.turn_x=(float)atof(v);
+        else if (!strcmp(k,"mouse_turn_y")) c.turn_y=(float)atof(v);
+        else if (!strcmp(k,"mouse_sens")) c.sens=(float)atof(v);
+        else if (!strcmp(k,"mouse_decay")) c.decay=(float)atof(v);
+        else if (!strcmp(k,"mouse_deadzone")) c.deadzone=(float)atof(v);
+        else if (!strcmp(k,"mouse_queue_cap")) c.cap=(float)atof(v);
+        else if (!strcmp(k,"mouse_invert_y")) c.invert_y=atoi(v);
+        else for (int i=0;i<7;++i) if (!strcmp(k,mouse_names[i])) c.btn[i]=*v ? ps_by_name(v) : 0;
+    }
+    fclose(f);
+    if (c.turn_x<50) c.turn_x=50;
+    if (c.turn_y<50) c.turn_y=50;
+    if (c.deadzone<0) c.deadzone=0;
+    if (c.deadzone>0.5f) c.deadzone=0.5f;
+    mcfg=c;
+    printf("Runtime: mouse look: %s, turn %.0f/%.0f counts/s, sens %.2f, decay %.2f s, deadzone %.2f\n",
+           c.look ? "on" : "off",c.turn_x,c.turn_y,c.sens,c.decay,c.deadzone);
+}
+static pthread_mutex_t mouse_lock=PTHREAD_MUTEX_INITIALIZER;
+static float mq_x, mq_y;           /* queued counts */
+static uint8_t mo_x=128, mo_y=128; /* last output */
+static uint64_t m_last_us;
+static int m_toggled_off, m_f8_was_down, m_wheel_up_ms, m_wheel_down_ms;
+static uint8_t stick_byte(float s) { /* s in -1..1 */
+    int v=(int)lrintf(128.0f+s*127.0f); return (uint8_t)(v<0 ? 0 : v>255 ? 255 : v);
+}
+static float stick_from_queue(float *q, float turn, float dt, float dz, float cap) {
+    if (cap>0) { if (*q>cap) *q=cap; if (*q<-cap) *q=-cap; }
+    if (fabsf(*q)<0.25f) { *q=0; return 0; }
+    float u=*q/(dt*turn);
+    if (u>1) u=1; if (u<-1) u=-1;
+    *q-=u*turn*dt;
+    const float mag=fabsf(u);
+    const float s=dz+(1.0f-dz)*mag;
+    return u<0 ? -s : s;
+}
+static void mouse_apply(PadData *d, const bool *k) {
+    mouse_load();
+    const int wanted=mcfg.look && !m_toggled_off;
+    ps4rtgpu_mouse_look_set(wanted);
+    const int f8=k && k[SDL_SCANCODE_F8];
+    if (f8 && !m_f8_was_down) { m_toggled_off=!m_toggled_off; ps4rtgpu_mouse_look_set(mcfg.look && !m_toggled_off); }
+    m_f8_was_down=f8;
+    pthread_mutex_lock(&mouse_lock);
+    const uint64_t now=now_us();
+    float dt=m_last_us ? (float)(now-m_last_us)/1e6f : 0.0f;
+    m_last_us=now;
+    int dx=0,dy=0,wheel=0;
+    const int active=ps4rtgpu_mouse_look_active();
+    if (!active) { mq_x=mq_y=0; mo_x=mo_y=128; m_wheel_up_ms=m_wheel_down_ms=0; ps4rtgpu_mouse_look_take(&dx,&dy,&wheel); pthread_mutex_unlock(&mouse_lock); return; }
+    ps4rtgpu_mouse_look_take(&dx,&dy,&wheel);
+    if (dt>0.1f) dt=0.1f;
+    mq_x+=(float)dx*mcfg.sens;
+    mq_y+=(float)(mcfg.invert_y ? -dy : dy)*mcfg.sens;
+    if (dt>=0.0005f) {
+        if (mcfg.decay>0.01f) { const float f=expf(-dt/mcfg.decay); mq_x*=f; mq_y*=f; }
+        mo_x=stick_byte(stick_from_queue(&mq_x,mcfg.turn_x,dt,mcfg.deadzone,mcfg.cap));
+        mo_y=stick_byte(stick_from_queue(&mq_y,mcfg.turn_y,dt,mcfg.deadzone,mcfg.cap));
+    }
+    if (mo_x!=128) d->right_x=mo_x;
+    if (mo_y!=128) d->right_y=mo_y;
+    pthread_mutex_unlock(&mouse_lock);
+    /* buttons: left right middle x1 x2 */
+    const uint32_t mb=SDL_GetMouseState(NULL,NULL);
+    const uint32_t masks[5]={SDL_BUTTON_LMASK,SDL_BUTTON_RMASK,SDL_BUTTON_MMASK,SDL_BUTTON_X1MASK,SDL_BUTTON_X2MASK};
+    for (int i=0;i<5;++i) if ((mb & masks[i]) && mcfg.btn[i]) d->buttons|=mcfg.btn[i];
+    if (wheel>0) m_wheel_up_ms=60; else if (wheel<0) m_wheel_down_ms=60;
+    if (dt>0) { m_wheel_up_ms-=(int)(dt*1000); m_wheel_down_ms-=(int)(dt*1000); }
+    if (m_wheel_up_ms>0 && mcfg.btn[5]) d->buttons|=mcfg.btn[5];
+    if (m_wheel_down_ms>0 && mcfg.btn[6]) d->buttons|=mcfg.btn[6];
+    if (d->buttons & BTN_L2) d->l2=255;
+    if (d->buttons & BTN_R2) d->r2=255;
+}
+
 static void key_axis(uint8_t *axis, bool negative, bool positive) {
     if (negative || positive) *axis=(uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0));
 }
@@ -289,6 +446,7 @@ static void sample_host(PadData *d) {
     key_axis(&d->left_y,k[SDL_SCANCODE_W],k[SDL_SCANCODE_S]);
     key_axis(&d->right_x,k[SDL_SCANCODE_LEFT],k[SDL_SCANCODE_RIGHT]);
     key_axis(&d->right_y,k[SDL_SCANCODE_UP],k[SDL_SCANCODE_DOWN]);
+    mouse_apply(d,k);
 }
 
 /* PS4RT_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
