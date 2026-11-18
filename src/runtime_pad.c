@@ -252,7 +252,7 @@ static void load_button_maps(void) {
  *   mouse_turn_y=1500   same for pitch
  *   mouse_sens=1.0      scales mouse counts entering the queue (1.0 = 1 count -> 1 queued count)
  *   mouse_decay=1.0     seconds; the queued movement fades with this time constant (0 = never)
- *   mouse_deadzone=0.08 stick deflection that just starts the camera turning (game dead zone)
+ *   mouse_deadzone=0.28 stick deflection that just starts the camera turning (game dead zone)
  *   mouse_queue_cap=0   largest queue in counts (0 = unlimited)
  *   mouse_invert_y=0
  *   mouse_left/right/middle/x1/x2/wheel_up/wheel_down=<ps4 button name or empty>
@@ -264,7 +264,7 @@ typedef struct {
     int look; float turn_x, turn_y, sens, decay, deadzone, cap; int invert_y; int axial; float curve;
     uint32_t btn[7]; /* left right middle x1 x2 wheel_up wheel_down */
 } MouseCfg;
-static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.08f,0,0,1,1.0f,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
+static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.28f,0,0,1,1.0f,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
 static const char *mouse_names[7]={"mouse_left","mouse_right","mouse_middle","mouse_x1","mouse_x2","mouse_wheel_up","mouse_wheel_down"};
 
 static const char *mouse_ini_path(void) {
@@ -295,8 +295,8 @@ static void mouse_write_default(const char *path) {
               "mouse_sens=1.0\n"
               "# queued turning fades with this time constant in seconds (0 = never fades)\n"
               "mouse_decay=1.0\n"
-              "# stick deflection at which the game starts turning (0 - 0.5)\n"
-              "mouse_deadzone=0.08\n"
+              "# stick deflection at which the game starts turning (measured: about 0.25-0.3)\n"
+              "mouse_deadzone=0.28\n"
               "# largest queue in counts, 0 = unlimited\n"
               "mouse_queue_cap=0\nmouse_invert_y=0\n"
               "# 1 = the game's dead zone is per axis (square), 0 = circular. Try both if diagonals feel bad.\n"
@@ -410,17 +410,21 @@ static SweepStep sweep[160]; static int sweep_n;
 static void sweep_add(float dur, float x, float y) { if (sweep_n<(int)(sizeof(sweep)/sizeof(*sweep))) sweep[sweep_n++]=(SweepStep){dur,x,y}; }
 static void sweep_build(void) {
     sweep_n=0;
-    static const float lv[]={0.05f,0.10f,0.15f,0.20f,0.25f,0.30f,0.40f,0.50f,0.60f,0.70f,0.80f,0.90f,1.00f};
-    sweep_add(0.6f,1,0); sweep_add(1.5f,0,0);                       /* start marker */
-    for (int axis=0;axis<2;++axis) for (int i=0;i<13;++i) {
-        const float v=(i&1 ? -1.0f : 1.0f)*lv[i];
-        sweep_add(1.0f,axis ? 0 : v,axis ? v : 0); sweep_add(0.6f,0,0);
+    sweep_add(0.6f,1,0); sweep_add(2.0f,0,0);                       /* start marker */
+    for (int i=0;i<16;++i) {                                        /* X: 0.25 .. 1.00, 3 s each */
+        const float v=0.25f+0.05f*(float)i;
+        sweep_add(3.0f,(i&1 ? -1.0f : 1.0f)*v,0); sweep_add(1.0f,0,0);
+    }
+    sweep_add(5.0f,0.6f,0); sweep_add(2.0f,0,0);                    /* ramp test: 0.6 held 5 s */
+    for (int i=0;i<6;++i) {                                         /* Y: 0.25 .. 1.00, 1.5 s each */
+        const float v=0.25f+0.15f*(float)i;
+        sweep_add(1.5f,0,(i&1 ? -1.0f : 1.0f)*v); sweep_add(1.0f,0,0);
     }
     static const float ang[2]={0.2915f,0.7854f};                    /* 16.7 and 45 degrees */
-    static const float dl[]={0.20f,0.40f,0.60f,0.80f,1.00f};
-    for (int a=0;a<2;++a) for (int i=0;i<5;++i) {
+    static const float dl[]={0.5f,0.8f,1.0f};
+    for (int a=0;a<2;++a) for (int i=0;i<3;++i) {
         const float sg=(i&1 ? -1.0f : 1.0f);
-        sweep_add(1.0f,sg*dl[i]*cosf(ang[a]),sg*dl[i]*sinf(ang[a])); sweep_add(0.6f,0,0);
+        sweep_add(2.0f,sg*dl[i]*cosf(ang[a]),sg*dl[i]*sinf(ang[a])); sweep_add(1.0f,0,0);
     }
     sweep_add(0.6f,1,0); sweep_add(1.0f,0,0);                       /* end marker */
 }
