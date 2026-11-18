@@ -400,8 +400,53 @@ static void mouse_stick(float dt, uint8_t *ox, uint8_t *oy) {
         }
     }
 }
+
+/* ---- Stick calibration sweep (F7) ------------------------------------------------------------
+ * Feeds the right stick a fixed schedule (a marker pulse, then X levels, Y levels and diagonals,
+ * alternating direction so pitch never hits its limit) so the camera's response can be measured
+ * from a recording. Mouse input is ignored while it runs; the steps are printed with their times. */
+typedef struct { float dur, x, y; } SweepStep;
+static SweepStep sweep[160]; static int sweep_n;
+static void sweep_add(float dur, float x, float y) { if (sweep_n<(int)(sizeof(sweep)/sizeof(*sweep))) sweep[sweep_n++]=(SweepStep){dur,x,y}; }
+static void sweep_build(void) {
+    sweep_n=0;
+    static const float lv[]={0.05f,0.10f,0.15f,0.20f,0.25f,0.30f,0.40f,0.50f,0.60f,0.70f,0.80f,0.90f,1.00f};
+    sweep_add(0.6f,1,0); sweep_add(1.5f,0,0);                       /* start marker */
+    for (int axis=0;axis<2;++axis) for (int i=0;i<13;++i) {
+        const float v=(i&1 ? -1.0f : 1.0f)*lv[i];
+        sweep_add(1.0f,axis ? 0 : v,axis ? v : 0); sweep_add(0.6f,0,0);
+    }
+    static const float ang[2]={0.2915f,0.7854f};                    /* 16.7 and 45 degrees */
+    static const float dl[]={0.20f,0.40f,0.60f,0.80f,1.00f};
+    for (int a=0;a<2;++a) for (int i=0;i<5;++i) {
+        const float sg=(i&1 ? -1.0f : 1.0f);
+        sweep_add(1.0f,sg*dl[i]*cosf(ang[a]),sg*dl[i]*sinf(ang[a])); sweep_add(0.6f,0,0);
+    }
+    sweep_add(0.6f,1,0); sweep_add(1.0f,0,0);                       /* end marker */
+}
+static int sweep_active; static uint64_t sweep_t0; static int sweep_last=-1;
+static int sweep_apply(PadData *d) {
+    if (!sweep_active) return 0;
+    float t=(float)(now_us()-sweep_t0)/1e6f, acc=0;
+    int idx=-1;
+    for (int i=0;i<sweep_n;++i) { if (t<acc+sweep[i].dur) { idx=i; break; } acc+=sweep[i].dur; }
+    if (idx<0) { sweep_active=0; printf("Runtime: stick sweep finished\n"); return 0; }
+    if (idx!=sweep_last) {
+        sweep_last=idx;
+        if (sweep[idx].x!=0 || sweep[idx].y!=0) printf("Runtime: sweep t=%.2f step %d stick x=%.3f y=%.3f (right = +x, down = +y)\n",t,idx,sweep[idx].x,sweep[idx].y);
+    }
+    d->right_x=stick_byte(sweep[idx].x); d->right_y=stick_byte(sweep[idx].y);
+    return 1;
+}
 static void mouse_apply(PadData *d, const bool *k) {
     mouse_load();
+    {   static int f7_was_down; const int f7=k && k[SDL_SCANCODE_F7];
+        if (f7 && !f7_was_down && !sweep_active) {
+            sweep_build(); sweep_active=1; sweep_t0=now_us(); sweep_last=-1;
+            printf("Runtime: stick sweep started (%d steps, about %.0f s): keep the mouse still\n",sweep_n,
+                   ({ float tt=0; for (int i=0;i<sweep_n;++i) tt+=sweep[i].dur; tt; }));
+        }
+        f7_was_down=f7; }
     const int wanted=mcfg.look && !m_toggled_off;
     ps4rtgpu_mouse_look_set(wanted);
     const int f8=k && k[SDL_SCANCODE_F8];
@@ -413,8 +458,9 @@ static void mouse_apply(PadData *d, const bool *k) {
     m_last_us=now;
     int dx=0,dy=0,wheel=0;
     const int active=ps4rtgpu_mouse_look_active();
-    if (!active) { mq_x=mq_y=0; mo_x=mo_y=128; m_wheel_up_ms=m_wheel_down_ms=0; ps4rtgpu_mouse_look_take(&dx,&dy,&wheel); pthread_mutex_unlock(&mouse_lock); return; }
+    if (!active) { mq_x=mq_y=0; mo_x=mo_y=128; m_wheel_up_ms=m_wheel_down_ms=0; ps4rtgpu_mouse_look_take(&dx,&dy,&wheel); pthread_mutex_unlock(&mouse_lock); sweep_apply(d); return; }
     ps4rtgpu_mouse_look_take(&dx,&dy,&wheel);
+    if (sweep_active) { mq_x=mq_y=0; pthread_mutex_unlock(&mouse_lock); sweep_apply(d); return; }
     if (dt>0.1f) dt=0.1f;
     mq_x+=(float)dx*mcfg.sens;
     mq_y+=(float)(mcfg.invert_y ? -dy : dy)*mcfg.sens;
