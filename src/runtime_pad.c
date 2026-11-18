@@ -352,15 +352,30 @@ static int m_toggled_off, m_f8_was_down, m_wheel_up_ms, m_wheel_down_ms;
 static uint8_t stick_byte(float s) { /* s in -1..1 */
     int v=(int)lrintf(128.0f+s*127.0f); return (uint8_t)(v<0 ? 0 : v>255 ? 255 : v);
 }
-static float stick_from_queue(float *q, float turn, float dt, float dz, float cap) {
-    if (cap>0) { if (*q>cap) *q=cap; if (*q<-cap) *q=-cap; }
-    if (fabsf(*q)<0.25f) { *q=0; return 0; }
-    float u=*q/(dt*turn);
-    if (u>1) u=1; if (u<-1) u=-1;
-    *q-=u*turn*dt;
-    const float mag=fabsf(u);
-    const float s=dz+(1.0f-dz)*mag;
-    return u<0 ? -s : s;
+/* Both axes together: the turn needed to drain the queue within this poll is a vector (in units of
+ * the per-axis speed cap); if it is longer than full stick it is scaled down, not clipped per
+ * axis, so a diagonal flick keeps its direction. The dead zone is radial too. The output is
+ * quantized to the pad's 8-bit stick, and the queue is drained by what that byte really asks for
+ * (error feedback), so the rounding steps average out instead of forming a grid. */
+static void mouse_stick(float dt, uint8_t *ox, uint8_t *oy) {
+    if (mcfg.cap>0) {
+        if (mq_x>mcfg.cap) mq_x=mcfg.cap; if (mq_x<-mcfg.cap) mq_x=-mcfg.cap;
+        if (mq_y>mcfg.cap) mq_y=mcfg.cap; if (mq_y<-mcfg.cap) mq_y=-mcfg.cap;
+    }
+    float ux=mq_x/(dt*mcfg.turn_x), uy=mq_y/(dt*mcfg.turn_y);
+    float mag=sqrtf(ux*ux+uy*uy);
+    if (mag<0.25f/(dt*(mcfg.turn_x<mcfg.turn_y ? mcfg.turn_x : mcfg.turn_y))) { mq_x=mq_y=0; *ox=*oy=128; return; }
+    if (mag>1.0f) { ux/=mag; uy/=mag; mag=1.0f; }
+    const float dz=mcfg.deadzone;
+    const float s=dz+(1.0f-dz)*mag;          /* radial stick magnitude */
+    *ox=stick_byte(ux/mag*s); *oy=stick_byte(uy/mag*s);
+    /* what the quantized stick actually turns */
+    const float qx=((float)*ox-128.0f)/127.0f, qy=((float)*oy-128.0f)/127.0f;
+    const float qm=sqrtf(qx*qx+qy*qy);
+    if (qm>dz) {
+        const float f=(qm-dz)/(1.0f-dz)/qm;
+        mq_x-=qx*f*mcfg.turn_x*dt; mq_y-=qy*f*mcfg.turn_y*dt;
+    }
 }
 static void mouse_apply(PadData *d, const bool *k) {
     mouse_load();
@@ -382,8 +397,7 @@ static void mouse_apply(PadData *d, const bool *k) {
     mq_y+=(float)(mcfg.invert_y ? -dy : dy)*mcfg.sens;
     if (dt>=0.0005f) {
         if (mcfg.decay>0.01f) { const float f=expf(-dt/mcfg.decay); mq_x*=f; mq_y*=f; }
-        mo_x=stick_byte(stick_from_queue(&mq_x,mcfg.turn_x,dt,mcfg.deadzone,mcfg.cap));
-        mo_y=stick_byte(stick_from_queue(&mq_y,mcfg.turn_y,dt,mcfg.deadzone,mcfg.cap));
+        mouse_stick(dt,&mo_x,&mo_y);
     }
     if (mo_x!=128) d->right_x=mo_x;
     if (mo_y!=128) d->right_y=mo_y;
