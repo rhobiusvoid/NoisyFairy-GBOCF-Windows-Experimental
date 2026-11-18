@@ -261,10 +261,10 @@ static void load_button_maps(void) {
  * speed until the queue is empty, a small one turns proportionally); the queue loses what the
  * camera turned and fades by mouse_decay. */
 typedef struct {
-    int look; float turn_x, turn_y, sens, decay, deadzone, cap; int invert_y;
+    int look; float turn_x, turn_y, sens, decay, deadzone, cap; int invert_y; int axial; float curve;
     uint32_t btn[7]; /* left right middle x1 x2 wheel_up wheel_down */
 } MouseCfg;
-static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.08f,0,0,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
+static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.08f,0,0,1,1.0f,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
 static const char *mouse_names[7]={"mouse_left","mouse_right","mouse_middle","mouse_x1","mouse_x2","mouse_wheel_up","mouse_wheel_down"};
 
 static const char *mouse_ini_path(void) {
@@ -299,6 +299,10 @@ static void mouse_write_default(const char *path) {
               "mouse_deadzone=0.08\n"
               "# largest queue in counts, 0 = unlimited\n"
               "mouse_queue_cap=0\nmouse_invert_y=0\n"
+              "# 1 = the game's dead zone is per axis (square), 0 = circular. Try both if diagonals feel bad.\n"
+              "mouse_deadzone_mode=1\n"
+              "# the game's stick response exponent (1 = linear; >1 if small stick movements turn too little)\n"
+              "mouse_curve=1.0\n"
               "mouse_left=r2\nmouse_right=l2\nmouse_middle=r3\nmouse_x1=l1\nmouse_x2=r1\nmouse_wheel_up=\nmouse_wheel_down=\n");
     fclose(f);
 }
@@ -333,6 +337,8 @@ static void mouse_load(void) {
         else if (!strcmp(k,"mouse_deadzone")) c.deadzone=(float)atof(v);
         else if (!strcmp(k,"mouse_queue_cap")) c.cap=(float)atof(v);
         else if (!strcmp(k,"mouse_invert_y")) c.invert_y=atoi(v);
+        else if (!strcmp(k,"mouse_deadzone_mode")) c.axial=atoi(v)!=0;
+        else if (!strcmp(k,"mouse_curve")) c.curve=(float)atof(v);
         else for (int i=0;i<7;++i) if (!strcmp(k,mouse_names[i])) c.btn[i]=*v ? ps_by_name(v) : 0;
     }
     fclose(f);
@@ -341,8 +347,8 @@ static void mouse_load(void) {
     if (c.deadzone<0) c.deadzone=0;
     if (c.deadzone>0.5f) c.deadzone=0.5f;
     mcfg=c;
-    printf("Runtime: mouse look: %s, turn %.0f/%.0f counts/s, sens %.2f, decay %.2f s, deadzone %.2f\n",
-           c.look ? "on" : "off",c.turn_x,c.turn_y,c.sens,c.decay,c.deadzone);
+    printf("Runtime: mouse look: %s, turn %.0f/%.0f counts/s, sens %.2f, decay %.2f s, deadzone %.2f (%s), curve %.2f\n",
+           c.look ? "on" : "off",c.turn_x,c.turn_y,c.sens,c.decay,c.deadzone,c.axial ? "axial" : "radial",c.curve);
 }
 static pthread_mutex_t mouse_lock=PTHREAD_MUTEX_INITIALIZER;
 static float mq_x, mq_y;           /* queued counts */
@@ -354,9 +360,12 @@ static uint8_t stick_byte(float s) { /* s in -1..1 */
 }
 /* Both axes together: the turn needed to drain the queue within this poll is a vector (in units of
  * the per-axis speed cap); if it is longer than full stick it is scaled down, not clipped per
- * axis, so a diagonal flick keeps its direction. The dead zone is radial too. The output is
- * quantized to the pad's 8-bit stick, and the queue is drained by what that byte really asks for
- * (error feedback), so the rounding steps average out instead of forming a grid. */
+ * axis, so a diagonal flick keeps its direction. mouse_curve undoes an expo-style stick response
+ * (the game turns ~ stick^curve). mouse_deadzone_mode 1 (axial) lifts each axis past a per-axis
+ * game dead zone, 0 (radial) lifts the stick magnitude past a circular one. The output is
+ * quantized to the pad's 8-bit stick, and the queue is drained by what the bytes really ask for
+ * (error feedback), so rounding steps average out instead of forming a grid. */
+static float mouse_expo(float u, float inv) { return u<=0 ? 0 : powf(u,inv); }
 static void mouse_stick(float dt, uint8_t *ox, uint8_t *oy) {
     if (mcfg.cap>0) {
         if (mq_x>mcfg.cap) mq_x=mcfg.cap; if (mq_x<-mcfg.cap) mq_x=-mcfg.cap;
@@ -364,17 +373,31 @@ static void mouse_stick(float dt, uint8_t *ox, uint8_t *oy) {
     }
     float ux=mq_x/(dt*mcfg.turn_x), uy=mq_y/(dt*mcfg.turn_y);
     float mag=sqrtf(ux*ux+uy*uy);
-    if (mag<0.25f/(dt*(mcfg.turn_x<mcfg.turn_y ? mcfg.turn_x : mcfg.turn_y))) { mq_x=mq_y=0; *ox=*oy=128; return; }
+    const float tmin=mcfg.turn_x<mcfg.turn_y ? mcfg.turn_x : mcfg.turn_y;
+    if (mag<0.25f/(dt*tmin)) { mq_x=mq_y=0; *ox=*oy=128; return; }
     if (mag>1.0f) { ux/=mag; uy/=mag; mag=1.0f; }
-    const float dz=mcfg.deadzone;
-    const float s=dz+(1.0f-dz)*mag;          /* radial stick magnitude */
-    *ox=stick_byte(ux/mag*s); *oy=stick_byte(uy/mag*s);
-    /* what the quantized stick actually turns */
+    const float dz=mcfg.deadzone, curve=mcfg.curve>0.1f ? mcfg.curve : 1.0f, inv=1.0f/curve;
+    float sx, sy;
+    if (mcfg.axial) {
+        sx=fabsf(mq_x)<0.25f ? 0 : dz+(1.0f-dz)*mouse_expo(fabsf(ux),inv);
+        sy=fabsf(mq_y)<0.25f ? 0 : dz+(1.0f-dz)*mouse_expo(fabsf(uy),inv);
+        if (ux<0) sx=-sx; if (uy<0) sy=-sy;
+    } else {
+        const float s=dz+(1.0f-dz)*mouse_expo(mag,inv);
+        sx=ux/mag*s; sy=uy/mag*s;
+    }
+    *ox=stick_byte(sx); *oy=stick_byte(sy);
     const float qx=((float)*ox-128.0f)/127.0f, qy=((float)*oy-128.0f)/127.0f;
-    const float qm=sqrtf(qx*qx+qy*qy);
-    if (qm>dz) {
-        const float f=(qm-dz)/(1.0f-dz)/qm;
-        mq_x-=qx*f*mcfg.turn_x*dt; mq_y-=qy*f*mcfg.turn_y*dt;
+    if (mcfg.axial) {
+        const float ax=fabsf(qx), ay=fabsf(qy);
+        if (ax>dz) mq_x-=(qx<0 ? -1 : 1)*powf((ax-dz)/(1.0f-dz),curve)*mcfg.turn_x*dt;
+        if (ay>dz) mq_y-=(qy<0 ? -1 : 1)*powf((ay-dz)/(1.0f-dz),curve)*mcfg.turn_y*dt;
+    } else {
+        const float qm=sqrtf(qx*qx+qy*qy);
+        if (qm>dz) {
+            const float f=powf((qm-dz)/(1.0f-dz),curve)/qm;
+            mq_x-=qx*f*mcfg.turn_x*dt; mq_y-=qy*f*mcfg.turn_y*dt;
+        }
     }
 }
 static void mouse_apply(PadData *d, const bool *k) {
