@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // NoisyFairy launcher: borderless SDL3 + Dear ImGui front end for scripts/ps4rt_launch.py (Windows).
-// Two tabs: Launcher (game folder, Play, DLC) and Options (the same ps4rt.ini keys as the in-game menu,
-// plus an optional log file under out/CUSA28763/user/log).
+// Three tabs: Launcher (game folder, Play, DLC), Options (the same ps4rt.ini keys as the in-game menu,
+// plus an optional log file under out/CUSA28763/user/log) and Controls (keyboard and mouse bindings,
+// ps4rt_mouse.ini; the same panel as the in-game menu).
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
 #include <algorithm>
@@ -25,6 +26,7 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 #include "ps4rt_png.h"
+#include "ps4rt_controls.h"
 
 namespace fs = std::filesystem;
 
@@ -369,6 +371,8 @@ int main(int, char**) {
 
     Ini game_ini{out_dir / "ps4rt.ini"};      // shared with the in-game menu
     game_ini.load();
+    Ps4RtControls::Panel controls;           // keyboard and mouse controls: out/CUSA28763/ps4rt_mouse.ini
+    controls.SetPath(out_dir / "ps4rt_mouse.ini");
     Ini launcher_ini{root / "out" / "launcher.ini"};
     launcher_ini.load();
 
@@ -450,6 +454,7 @@ int main(int, char**) {
     while (!done) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && controls.Capturing() && controls.OnKey(ev.key.scancode)) continue;
             ImGui_ImplSDL3_ProcessEvent(&ev);
             if (ev.type == SDL_EVENT_QUIT || ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) done = true;
         }
@@ -588,6 +593,16 @@ int main(int, char**) {
                 else if (play) SDL_MinimizeWindow(window);
             }
 #endif
+        } else if (tab == 2) {
+            ImGui::BeginChild("##controls", {0, 0}, false, ImGuiWindowFlags_NoBackground);
+            controls.Draw();
+            ImGui::Dummy({0, 6});
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::PushTextWrapPos(kCol - 20);
+            ImGui::TextUnformatted("Changes are saved immediately and also apply to a running game within a second. The in-game menu (Insert) has the same Controls tab.");
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            ImGui::EndChild();
         } else {
             ImGui::BeginChild("##opts", {0, 0}, false, ImGuiWindowFlags_NoBackground);
             section("DISPLAY");
@@ -717,9 +732,11 @@ int main(int, char**) {
         // Tab buttons, bottom left.
         ImGui::SetCursorPos({left, kH - 74.f});
         if (fonts.bold) ImGui::PushFont(fonts.bold, 18.f);
-        if (nf_button("LAUNCHER", {160, 46}, tab == 0)) tab = 0;
+        if (nf_button("LAUNCHER", {140, 46}, tab == 0)) tab = 0;
         ImGui::SameLine(0, 12);
-        if (nf_button("OPTIONS", {160, 46}, tab == 1)) tab = 1;
+        if (nf_button("OPTIONS", {140, 46}, tab == 1)) tab = 1;
+        ImGui::SameLine(0, 12);
+        if (nf_button("CONTROLS", {140, 46}, tab == 2)) { tab = 2; controls.CancelCapture(); }
         if (fonts.bold) ImGui::PopFont();
         ImGui::SameLine(0, 18);
         ImGui::AlignTextToFramePadding();

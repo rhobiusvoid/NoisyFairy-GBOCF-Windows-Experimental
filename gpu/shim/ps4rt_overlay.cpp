@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <thread>
 #if !defined(_WIN32)
@@ -33,6 +34,7 @@ extern char **environ;
 #include "ps4rt_graphics.h"
 #include "ps4rt_perf_stats.h"
 #include "ps4rt_achievements_ui.h"
+#include "ps4rt_controls.h"
 
 extern "C" void runtime_restart(void); // src/probe.c: starts run.py again, ends this process
 #include "common/elf_info.h"
@@ -160,6 +162,16 @@ void ShowDlcInstallerStatus() {
     }
 }
 #endif
+Ps4RtControls::Panel controls_panel;   // Controls tab: keyboard and mouse bindings (ps4rt_mouse.ini)
+void EnsureControlsPath() {
+    static bool set = false;
+    if (set) return;
+    set = true;
+    const char* cfg = std::getenv("PS4RT_CONFIG");
+    std::filesystem::path path = cfg && *cfg ? cfg : "ps4rt.ini";
+    path.replace_filename("ps4rt_mouse.ini");
+    controls_panel.SetPath(path);
+}
 int requested_tab = -1; // switch on the next frame (L1/R1, Q/E, menu opened)
 // The game's text dialog (SetTextEntry), guarded by imgui_mutex.
 bool text_entry_active = false;
@@ -197,6 +209,8 @@ void SetOpen(bool value) {
     ImGui::ClosePopupsOverWindow(nullptr, false);
     if (value) {
         requested_tab = Ps4RtSettings::Get().menu_tab;
+        if (requested_tab > 4 && !Ps4RtSettings::Get().CompactGraphicsMenu()) requested_tab = 0;
+        controls_panel.CancelCapture();
         focus_graphics = true;
         menu_sounds.Play(Ps4RtMenuSounds::Cue::Confirm);
     } else {
@@ -773,18 +787,21 @@ void Menu() {
                               ImGui::IsKeyPressed(ImGuiKey_E, false) ||
                               ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ||
                               ImGui::IsKeyPressed(ImGuiKey_Q, false);
-        if (!ImGui::GetIO().WantTextInput && next_tab)
-            requested_tab = s.menu_tab == 4 ? 0 : 4;
-        if (requested_tab != 4 && requested_tab >= 0) requested_tab = 0;
+        if (!ImGui::GetIO().WantTextInput && !controls_panel.Capturing() && next_tab)
+            requested_tab = s.menu_tab == 0 ? 5 : s.menu_tab == 5 ? 4 : 0;
+        if (requested_tab != 4 && requested_tab != 5 && requested_tab >= 0) requested_tab = 0;
+        EnsureControlsPath();
         if (ImGui::BeginTabBar("##compact_tabs")) {
-            for (int tab : {0, 4}) {
+            for (int tab : {0, 5, 4}) {
                 const auto flags = requested_tab == tab ? ImGuiTabItemFlags_SetSelected : 0;
-                if (!ImGui::BeginTabItem(tab == 4 ? "Achievements" : "Graphics", nullptr, flags)) continue;
+                if (!ImGui::BeginTabItem(tab == 4 ? "Achievements" : tab == 5 ? "Controls" : "Graphics", nullptr, flags)) continue;
+                if (tab != 5) controls_panel.CancelCapture();
                 if (s.menu_tab != tab) { s.menu_tab = tab; dirty = true; }
                 const float footer = tab == 4 ? ImGui::GetTextLineHeightWithSpacing() * 3.0f :
                     ImGui::GetFrameHeightWithSpacing() * 3.0f + ImGui::GetTextLineHeightWithSpacing() * 3.0f;
                 if (ImGui::BeginChild("##compact_body", ImVec2(0, -footer))) {
                     if (tab == 4) Ps4RtAchievementsUi::List(base_scale);
+                    else if (tab == 5) controls_panel.Draw();
                     else CompactGraphics();
                 }
                 ImGui::EndChild();
@@ -1389,6 +1406,11 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
+        if (is_open && controls_panel.Capturing() && event.key.key != SDLK_INSERT) {
+            // Controls tab: the next key press becomes the new binding.
+            if (down && !event.key.repeat) controls_panel.OnKey(event.key.scancode);
+            return true;
+        }
         if (is_open && event.key.key == SDLK_ESCAPE &&
             (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) ||
              Ps4RtMenuNavigation::ChildPanelFocused())) {

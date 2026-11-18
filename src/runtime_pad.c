@@ -192,6 +192,21 @@ static ButtonMap key_map={{
     {SDL_SCANCODE_I,BTN_UP}, {SDL_SCANCODE_K,BTN_DOWN}, {SDL_SCANCODE_J,BTN_LEFT}, {SDL_SCANCODE_L,BTN_RIGHT},
 },17};
 
+/* Keys for the sticks: left x-,x+, left y-,y+, right x-,x+, right y-,y+ (0 = unbound). Set from ps4rt_mouse.ini
+ * (key_move_* / key_look_*). */
+static int stick_keys[8]={SDL_SCANCODE_A,SDL_SCANCODE_D,SDL_SCANCODE_W,SDL_SCANCODE_S,
+                          SDL_SCANCODE_LEFT,SDL_SCANCODE_RIGHT,SDL_SCANCODE_UP,SDL_SCANCODE_DOWN};
+static const char *stick_key_names[8]={"key_move_left","key_move_right","key_move_up","key_move_down",
+                                       "key_look_left","key_look_right","key_look_up","key_look_down"};
+/* ini key -> PS4 button name for the keyboard buttons (key_cross=Space ...). */
+static const struct { const char *key, *ps; } key_actions[]={
+    {"key_cross","cross"},{"key_circle","circle"},{"key_square","square"},{"key_triangle","triangle"},
+    {"key_l1","l1"},{"key_r1","r1"},{"key_l2","l2"},{"key_r2","r2"},{"key_l3","l3"},{"key_r3","r3"},
+    {"key_options","options"},{"key_touchpad_left","touchpad_left"},{"key_touchpad_right","touchpad_right"},
+    {"key_dpad_up","up"},{"key_dpad_down","down"},{"key_dpad_left","left"},{"key_dpad_right","right"},
+};
+#define KEY_ACTIONS ((int)(sizeof(key_actions)/sizeof(*key_actions)))
+
 static char *trim(char *text) {
     while (*text==' ' || *text=='\t') ++text;
     char *end=text+strlen(text);
@@ -289,6 +304,8 @@ static void mouse_write_default(const char *path) {
     fprintf(f,"# Mouse look settings (edit while the game runs; changes apply within a second).\n"
               "# F8 releases / recaptures the mouse. Buttons take: cross circle square triangle l1 r1 l2 r2 l3 r3 options\n"
               "# touchpad_left touchpad_right up down left right, or nothing.\n"
+              "# Keyboard: key_<button>=<key name> (key_cross, key_dpad_up, key_move_up, key_look_left ...), set in the\n"
+              "# launcher or the Insert menu (Controls). A missing key keeps its default.\n"
               "mouse_look=1\n"
               "# counts per second the camera turns at full stick (the MS turn speed cap)\n"
               "mouse_turn_x=1500\nmouse_turn_y=1500\n"
@@ -335,6 +352,9 @@ static void mouse_load(void) {
     FILE *f=fopen(path,"r");
     if (!f) return;
     MouseCfg c=mcfg; char line[256];
+    int kb_set[KEY_ACTIONS], sk_set[8];   /* -2 = not in the file, 0 = unbound, else a scancode */
+    for (int i=0;i<KEY_ACTIONS;++i) kb_set[i]=-2;
+    for (int i=0;i<8;++i) sk_set[i]=-2;
     while (fgets(line,sizeof(line),f)) {
         char *t=trim(line);
         if (!*t || *t=='#' || *t==';') continue;
@@ -359,6 +379,12 @@ static void mouse_load(void) {
         else if (!strcmp(k,"mouse_speed_y")) c.r_y=(float)atof(v);
         else if (!strcmp(k,"mouse_queue_cap_y")) c.cap_y=(float)atof(v);
         else if (!strcmp(k,"mouse_pitch_limit")) c.pitch_lim=(float)atof(v);
+        else if (!strncmp(k,"key_",4)) {
+            int sc=0;
+            if (*v) { sc=(int)SDL_GetScancodeFromName(v); if (sc<=0) { printf("Runtime: key binding: unknown key '%s' for %s\n",v,k); continue; } }
+            for (int i=0;i<KEY_ACTIONS;++i) if (!strcmp(k,key_actions[i].key)) kb_set[i]=sc;
+            for (int i=0;i<8;++i) if (!strcmp(k,stick_key_names[i])) sk_set[i]=sc;
+        }
         else for (int i=0;i<7;++i) if (!strcmp(k,mouse_names[i])) c.btn[i]=*v ? ps_by_name(v) : 0;
     }
     fclose(f);
@@ -366,6 +392,16 @@ static void mouse_load(void) {
     if (c.turn_y<50) c.turn_y=50;
     if (c.deadzone<0) c.deadzone=0;
     if (c.deadzone>0.5f) c.deadzone=0.5f;
+    for (int i=0;i<KEY_ACTIONS;++i) {
+        if (kb_set[i]==-2) continue;
+        const uint32_t ps=ps_by_name(key_actions[i].ps);
+        size_t kept=0;
+        for (size_t j=0;j<key_map.count;++j) if (key_map.entries[j].ps!=ps) key_map.entries[kept++]=key_map.entries[j];
+        key_map.count=kept;
+        if (kb_set[i]>0 && key_map.count<sizeof(key_map.entries)/sizeof(*key_map.entries))
+            key_map.entries[key_map.count++]=(ButtonSource){kb_set[i],ps};
+    }
+    for (int i=0;i<8;++i) if (sk_set[i]!=-2) stick_keys[i]=sk_set[i];
     mcfg=c;
     printf("Runtime: mouse look: %s, turn %.0f/%.0f counts/s, sens %.2f, decay %.2f s, deadzone %.2f (%s), curve %.2f\n",
            c.look ? "on" : "off",c.turn_x,c.turn_y,c.sens,c.decay,c.deadzone,c.axial ? "axial" : "radial",c.curve);
@@ -601,10 +637,12 @@ static void sample_host(PadData *d) {
     for (size_t i=0;i<key_map.count;++i) if (k[key_map.entries[i].source]) d->buttons|=key_map.entries[i].ps;
     if (d->buttons & BTN_L2) d->l2=255;
     if (d->buttons & BTN_R2) d->r2=255;
-    key_axis(&d->left_x,k[SDL_SCANCODE_A],k[SDL_SCANCODE_D]);
-    key_axis(&d->left_y,k[SDL_SCANCODE_W],k[SDL_SCANCODE_S]);
-    key_axis(&d->right_x,k[SDL_SCANCODE_LEFT],k[SDL_SCANCODE_RIGHT]);
-    key_axis(&d->right_y,k[SDL_SCANCODE_UP],k[SDL_SCANCODE_DOWN]);
+#define SK(i) (stick_keys[i]>0 && k[stick_keys[i]])
+    key_axis(&d->left_x,SK(0),SK(1));
+    key_axis(&d->left_y,SK(2),SK(3));
+    key_axis(&d->right_x,SK(4),SK(5));
+    key_axis(&d->right_y,SK(6),SK(7));
+#undef SK
     mouse_apply(d,k);
 }
 
