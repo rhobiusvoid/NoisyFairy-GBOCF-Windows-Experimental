@@ -262,9 +262,10 @@ static void load_button_maps(void) {
  * camera turned and fades by mouse_decay. */
 typedef struct {
     int look; float turn_x, turn_y, sens, decay, deadzone, cap; int invert_y; int axial; float curve;
+    int resp; float r_dz, r_sat, r_split, r_low_x, r_high_x, r_y;
     uint32_t btn[7]; /* left right middle x1 x2 wheel_up wheel_down */
 } MouseCfg;
-static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.28f,0,0,1,1.0f,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
+static MouseCfg mcfg={1,1500,1500,1.0f,1.0f,0.28f,0,0,1,1.0f,1,0.305f,0.575f,0.875f,900,1650,640,{BTN_R2,BTN_L2,BTN_R3,BTN_L1,BTN_R1,0,0}};
 static const char *mouse_names[7]={"mouse_left","mouse_right","mouse_middle","mouse_x1","mouse_x2","mouse_wheel_up","mouse_wheel_down"};
 
 static const char *mouse_ini_path(void) {
@@ -303,6 +304,13 @@ static void mouse_write_default(const char *path) {
               "mouse_deadzone_mode=1\n"
               "# the game's stick response exponent (1 = linear; >1 if small stick movements turn too little)\n"
               "mouse_curve=1.0\n"
+              "# mouse_response=1: drive the stick from the game's measured camera response (below). 0 = the older\n"
+              "# deadzone/curve model above. Measured on one MS: no turning below stick 0.30, linear rise to a\n"
+              "# first speed plateau at 0.575, a second faster plateau (X only) from about 0.875.\n"
+              "mouse_response=1\n"
+              "mouse_game_deadzone=0.305\nmouse_game_sat=0.575\nmouse_game_split=0.875\n"
+              "# camera speeds in mouse counts per second: yaw first plateau, yaw fast plateau, pitch plateau\n"
+              "mouse_speed_low_x=900\nmouse_speed_high_x=1650\nmouse_speed_y=640\n"
               "mouse_left=r2\nmouse_right=l2\nmouse_middle=r3\nmouse_x1=l1\nmouse_x2=r1\nmouse_wheel_up=\nmouse_wheel_down=\n");
     fclose(f);
 }
@@ -339,6 +347,13 @@ static void mouse_load(void) {
         else if (!strcmp(k,"mouse_invert_y")) c.invert_y=atoi(v);
         else if (!strcmp(k,"mouse_deadzone_mode")) c.axial=atoi(v)!=0;
         else if (!strcmp(k,"mouse_curve")) c.curve=(float)atof(v);
+        else if (!strcmp(k,"mouse_response")) c.resp=atoi(v);
+        else if (!strcmp(k,"mouse_game_deadzone")) c.r_dz=(float)atof(v);
+        else if (!strcmp(k,"mouse_game_sat")) c.r_sat=(float)atof(v);
+        else if (!strcmp(k,"mouse_game_split")) c.r_split=(float)atof(v);
+        else if (!strcmp(k,"mouse_speed_low_x")) c.r_low_x=(float)atof(v);
+        else if (!strcmp(k,"mouse_speed_high_x")) c.r_high_x=(float)atof(v);
+        else if (!strcmp(k,"mouse_speed_y")) c.r_y=(float)atof(v);
         else for (int i=0;i<7;++i) if (!strcmp(k,mouse_names[i])) c.btn[i]=*v ? ps_by_name(v) : 0;
     }
     fclose(f);
@@ -349,6 +364,7 @@ static void mouse_load(void) {
     mcfg=c;
     printf("Runtime: mouse look: %s, turn %.0f/%.0f counts/s, sens %.2f, decay %.2f s, deadzone %.2f (%s), curve %.2f\n",
            c.look ? "on" : "off",c.turn_x,c.turn_y,c.sens,c.decay,c.deadzone,c.axial ? "axial" : "radial",c.curve);
+    printf("Runtime: mouse response model %s (dz %.3f sat %.3f split %.3f, speeds %.0f/%.0f/%.0f counts/s)\n",c.resp ? "on" : "off",c.r_dz,c.r_sat,c.r_split,c.r_low_x,c.r_high_x,c.r_y);
 }
 static pthread_mutex_t mouse_lock=PTHREAD_MUTEX_INITIALIZER;
 static float mq_x, mq_y;           /* queued counts */
@@ -442,6 +458,43 @@ static int sweep_apply(PadData *d) {
     d->right_x=stick_byte(sweep[idx].x); d->right_y=stick_byte(sweep[idx].y);
     return 1;
 }
+
+/* Measured response model: each axis' camera speed is 0 below the game's dead zone, rises linearly
+ * to a plateau at r_sat, and (yaw only) jumps to a faster plateau above r_split. For the desired
+ * speed q/dt the stick is chosen by inverting that curve; between the two yaw plateaus the stick
+ * switches by threshold and the queue's error feedback averages it. The queue is drained by the
+ * speed the quantized stick really produces. */
+static float resp_speed(float s, float low, float high, float dz, float sat, float split) {
+    s=fabsf(s);
+    if (s<=dz) return 0;
+    if (high>0 && s>=split) return high;
+    const float f=(s-dz)/(sat-dz);
+    return low*(f>1 ? 1 : f);
+}
+static float resp_stick(float v, float low, float high, float dz, float sat) {
+    /* v: desired speed (>=0) -> stick magnitude 0..1 */
+    if (v<=0) return 0;
+    if (v>=low) return (high>0 && v>=(low+high)*0.5f) ? 1.0f : sat+0.03f;
+    return dz+0.004f+(sat-dz-0.004f)*(v/low);
+}
+static void mouse_stick_resp(float dt, uint8_t *ox, uint8_t *oy) {
+    const float dz=mcfg.r_dz, sat=mcfg.r_sat, split=mcfg.r_split;
+    if (mcfg.cap>0) {
+        if (mq_x>mcfg.cap) mq_x=mcfg.cap; if (mq_x<-mcfg.cap) mq_x=-mcfg.cap;
+        if (mq_y>mcfg.cap) mq_y=mcfg.cap; if (mq_y<-mcfg.cap) mq_y=-mcfg.cap;
+    }
+    float *q[2]={&mq_x,&mq_y};
+    const float low[2]={mcfg.r_low_x,mcfg.r_y}, high[2]={mcfg.r_high_x,0};
+    uint8_t *out[2]={ox,oy};
+    for (int a=0;a<2;++a) {
+        float v=fabsf(*q[a])/dt;
+        if (fabsf(*q[a])<0.25f) { *q[a]=0; *out[a]=128; continue; }
+        const float sgn=*q[a]<0 ? -1.0f : 1.0f;
+        *out[a]=stick_byte(sgn*resp_stick(v,low[a],high[a],dz,sat));
+        const float sb=((float)*out[a]-128.0f)/127.0f;
+        *q[a]-=(sb<0 ? -1.0f : 1.0f)*resp_speed(sb,low[a],high[a],dz,sat,split)*dt;
+    }
+}
 static void mouse_apply(PadData *d, const bool *k) {
     mouse_load();
     {   static int f7_was_down; const int f7=k && k[SDL_SCANCODE_F7];
@@ -470,7 +523,7 @@ static void mouse_apply(PadData *d, const bool *k) {
     mq_y+=(float)(mcfg.invert_y ? -dy : dy)*mcfg.sens;
     if (dt>=0.0005f) {
         if (mcfg.decay>0.01f) { const float f=expf(-dt/mcfg.decay); mq_x*=f; mq_y*=f; }
-        mouse_stick(dt,&mo_x,&mo_y);
+        if (mcfg.resp) mouse_stick_resp(dt,&mo_x,&mo_y); else mouse_stick(dt,&mo_x,&mo_y);
     }
     if (mo_x!=128) d->right_x=mo_x;
     if (mo_y!=128) d->right_y=mo_y;
