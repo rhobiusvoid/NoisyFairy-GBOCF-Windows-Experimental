@@ -633,7 +633,10 @@ int main(int, char**) {
                 for (const Hot& h : hot) controls.Cap(controls.IndexOf(h.key), {o.x + h.x * sc, o.y + h.y * sc}, h.prefix);
                 ImGui::SetCursorPos({16.f, 10.f + 742.f * sc + 4.f});
                 controls.DrawResets();
-                ImGui::SetCursorPos({16.f, 10.f + 742.f * sc + 36.f});
+                ImGui::SameLine(0, 18);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextDisabled("Click a label, then press a key. Changes save at once.");
+                ImGui::SetCursorPos({16.f, 10.f + 742.f * sc + 40.f});
                 controls.DrawNote();
                 ImGui::SetCursorPos({kListX + 8.f, 8.f});
                 ImGui::BeginChild("##ctl_list", {avail.x - kListX - 12.f, avail.y - 16.f}, false, ImGuiWindowFlags_NoBackground);
@@ -643,10 +646,6 @@ int main(int, char**) {
             } else {
                 controls.Draw();
             }
-            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            ImGui::SetCursorPos({16.f, avail.y - 20.f});
-            ImGui::TextUnformatted("Click a label on the controller, then press a key. Changes save at once and reach a running game within a second.");
-            ImGui::PopStyleColor();
         } else {
             ImGui::BeginChild("##opts", {0, 0}, false, ImGuiWindowFlags_NoBackground);
             section("DISPLAY");
