@@ -207,6 +207,31 @@ static const struct { const char *key, *ps; } key_actions[]={
 };
 #define KEY_ACTIONS ((int)(sizeof(key_actions)/sizeof(*key_actions)))
 
+/* Weapon slots: one key presses a combination of pad buttons (the game selects a weapon with the
+ * switch button plus a face button or a pair of them). The switch button is added to every slot; the
+ * combos are editable because players rebind the pad in the game. A slot stays pressed for at least
+ * weapon_hold_ms so a quick tap still lasts a few frames; weapon_stagger_ms holds the switch button
+ * alone for that long before the others join. */
+typedef struct { int key; uint32_t buttons; int was; uint64_t down_at, until; } WeaponSlot;
+static WeaponSlot wslot[8]={
+    {SDL_SCANCODE_KP_1,BTN_TRIANGLE},{SDL_SCANCODE_KP_2,BTN_TRIANGLE|BTN_CIRCLE},{SDL_SCANCODE_KP_3,BTN_CIRCLE},
+    {SDL_SCANCODE_KP_4,BTN_CIRCLE|BTN_CROSS},{SDL_SCANCODE_KP_5,BTN_CROSS},{SDL_SCANCODE_KP_6,BTN_CROSS|BTN_SQUARE},
+    {SDL_SCANCODE_KP_7,BTN_SQUARE},{SDL_SCANCODE_KP_8,BTN_SQUARE|BTN_TRIANGLE}};
+static uint32_t wswitch=BTN_R1;
+static int whold_ms=80, wstagger_ms=0;
+static void weapon_apply(PadData *d, const bool *k) {
+    const uint64_t now=now_us();
+    for (int i=0;i<8;++i) {
+        WeaponSlot *w=&wslot[i];
+        const int down=w->key>0 && k[w->key];
+        if (down && !w->was) { w->down_at=now; w->until=now+(uint64_t)whold_ms*1000; }
+        w->was=down;
+        if (!down && now>=w->until) continue;
+        d->buttons|=wswitch;
+        if (now-w->down_at>=(uint64_t)wstagger_ms*1000) d->buttons|=w->buttons;
+    }
+}
+
 static char *trim(char *text) {
     while (*text==' ' || *text=='\t') ++text;
     char *end=text+strlen(text);
@@ -306,6 +331,8 @@ static void mouse_write_default(const char *path) {
               "# touchpad_left touchpad_right up down left right, or nothing.\n"
               "# Keyboard: key_<button>=<key name> (key_cross, key_dpad_up, key_move_up, key_look_left ...), set in the\n"
               "# launcher or the Insert menu (Controls). A missing key keeps its default.\n"
+              "# Weapon slots: key_weapon1..8=<key>, weapon1..8=<button>[+<button>], weapon_switch=<button> (added to every slot),\n"
+              "# weapon_hold_ms (shortest press), weapon_stagger_ms (switch button first, others after this long).\n"
               "mouse_look=1\n"
               "# counts per second the camera turns at full stick (the MS turn speed cap)\n"
               "mouse_turn_x=1500\nmouse_turn_y=1500\n"
@@ -352,7 +379,8 @@ static void mouse_load(void) {
     FILE *f=fopen(path,"r");
     if (!f) return;
     MouseCfg c=mcfg; char line[256];
-    int kb_set[KEY_ACTIONS], sk_set[8];   /* -2 = not in the file, 0 = unbound, else a scancode */
+    int kb_set[KEY_ACTIONS], sk_set[8], wk_set[8]; uint32_t wb_set[8]; int wb_has[8]={0};
+    for (int i=0;i<8;++i) wk_set[i]=-2;   /* -2 = not in the file, 0 = unbound, else a scancode */
     for (int i=0;i<KEY_ACTIONS;++i) kb_set[i]=-2;
     for (int i=0;i<8;++i) sk_set[i]=-2;
     while (fgets(line,sizeof(line),f)) {
@@ -379,6 +407,19 @@ static void mouse_load(void) {
         else if (!strcmp(k,"mouse_speed_y")) c.r_y=(float)atof(v);
         else if (!strcmp(k,"mouse_queue_cap_y")) c.cap_y=(float)atof(v);
         else if (!strcmp(k,"mouse_pitch_limit")) c.pitch_lim=(float)atof(v);
+        else if (!strcmp(k,"weapon_switch")) wswitch=*v ? ps_by_name(v) : 0;
+        else if (!strcmp(k,"weapon_hold_ms")) { whold_ms=atoi(v); if (whold_ms<0) whold_ms=0; if (whold_ms>1000) whold_ms=1000; }
+        else if (!strcmp(k,"weapon_stagger_ms")) { wstagger_ms=atoi(v); if (wstagger_ms<0) wstagger_ms=0; if (wstagger_ms>500) wstagger_ms=500; }
+        else if (!strncmp(k,"weapon",6) && k[6]>='1' && k[6]<='8' && !k[7]) {
+            const int n=k[6]-'1'; uint32_t b=0; char tmp[128]; snprintf(tmp,sizeof(tmp),"%s",v);
+            for (char *part=strtok(tmp,"+,"); part; part=strtok(NULL,"+,")) b|=ps_by_name(trim(part));
+            wb_set[n]=b; wb_has[n]=1;
+        }
+        else if (!strncmp(k,"key_weapon",10) && k[10]>='1' && k[10]<='8' && !k[11]) {
+            int sc=0;
+            if (*v) { sc=(int)SDL_GetScancodeFromName(v); if (sc<=0) { printf("Runtime: key binding: unknown key '%s' for %s\n",v,k); continue; } }
+            wk_set[k[10]-'1']=sc;
+        }
         else if (!strncmp(k,"key_",4)) {
             int sc=0;
             if (*v) { sc=(int)SDL_GetScancodeFromName(v); if (sc<=0) { printf("Runtime: key binding: unknown key '%s' for %s\n",v,k); continue; } }
@@ -402,6 +443,7 @@ static void mouse_load(void) {
             key_map.entries[key_map.count++]=(ButtonSource){kb_set[i],ps};
     }
     for (int i=0;i<8;++i) if (sk_set[i]!=-2) stick_keys[i]=sk_set[i];
+    for (int i=0;i<8;++i) { if (wk_set[i]!=-2) wslot[i].key=wk_set[i]; if (wb_has[i]) wslot[i].buttons=wb_set[i]; }
     mcfg=c;
     printf("Runtime: mouse look: %s, turn %.0f/%.0f counts/s, sens %.2f, decay %.2f s, deadzone %.2f (%s), curve %.2f\n",
            c.look ? "on" : "off",c.turn_x,c.turn_y,c.sens,c.decay,c.deadzone,c.axial ? "axial" : "radial",c.curve);
@@ -635,6 +677,7 @@ static void sample_host(PadData *d) {
      * follows the keys only while one of them is held. */
     if (!k) return;
     for (size_t i=0;i<key_map.count;++i) if (k[key_map.entries[i].source]) d->buttons|=key_map.entries[i].ps;
+    weapon_apply(d,k);
     if (d->buttons & BTN_L2) d->l2=255;
     if (d->buttons & BTN_R2) d->r2=255;
 #define SK(i) (stick_keys[i]>0 && k[stick_keys[i]])

@@ -27,6 +27,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "ps4rt_png.h"
 #include "ps4rt_controls.h"
+#include "ps4rt_controller_png.h"
 
 namespace fs = std::filesystem;
 
@@ -436,6 +437,18 @@ int main(int, char**) {
 
     SDL_Texture* background = load_texture(renderer, assets / "background.png");
     SDL_Texture* logo = load_texture(renderer, assets / "logo.png");
+    SDL_Texture* controller_tex = nullptr;   // DualShock 4 picture of the Controls tab (embedded)
+    {
+        Ps4RtPng::Image image;
+        if (Ps4RtPng::DecodeRgba(kControllerPng, kControllerPngSize, image)) {
+            controller_tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, image.width, image.height);
+            if (controller_tex) {
+                SDL_UpdateTexture(controller_tex, nullptr, image.rgba.data(), image.width * 4);
+                SDL_SetTextureBlendMode(controller_tex, SDL_BLENDMODE_BLEND);
+                SDL_SetTextureScaleMode(controller_tex, SDL_SCALEMODE_LINEAR);
+            }
+        }
+    }
     SDL_Texture* gradient = make_gradient(renderer);
 
     FolderPicker picker;
@@ -521,8 +534,9 @@ int main(int, char**) {
         }
 
         const float left = 36.f, top = 188.f;
-        ImGui::SetCursorPos({left, top});
-        ImGui::BeginChild("##content", {kCol, kH - top - 96.f}, false, ImGuiWindowFlags_NoBackground);
+        const bool wide = tab == 2;   // the Controls tab uses the whole window (no logo)
+        ImGui::SetCursorPos(wide ? ImVec2{20.f, 16.f} : ImVec2{left, top});
+        ImGui::BeginChild("##content", wide ? ImVec2{kW - 40.f, kH - 16.f - 90.f} : ImVec2{kCol, kH - top - 96.f}, false, ImGuiWindowFlags_NoBackground);
 
         if (tab == 0) {
             ImGui::PushStyleColor(ImGuiCol_Text, kLabel);
@@ -594,15 +608,42 @@ int main(int, char**) {
             }
 #endif
         } else if (tab == 2) {
-            ImGui::BeginChild("##controls", {0, 0}, false, ImGuiWindowFlags_NoBackground);
-            controls.Draw();
-            ImGui::Dummy({0, 6});
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            const ImVec2 avail = ImGui::GetContentRegionAvail();
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(origin, {origin.x + avail.x, origin.y + avail.y}, ImGui::GetColorU32(kDim), 12.f);
+            constexpr float kListX = 712.f;
+            if (controller_tex) {
+                // Picture in 1100 x 742 units (880 x 594 pixels); the key labels sit on the buttons.
+                constexpr float sc = 0.62f;
+                const ImVec2 o{origin.x + 12.f, origin.y + 10.f};
+                dl->AddImage(ImTextureRef((ImTextureID)(uintptr_t)controller_tex), o, {o.x + 1100.f * sc, o.y + 742.f * sc});
+                struct Hot { const char* key; float x, y; const char* prefix; };
+                static const Hot hot[] = {
+                    {"l2", 205, 30, "L2"}, {"l1", 215, 88, "L1"}, {"r2", 885, 30, "R2"}, {"r1", 885, 88, "R1"},
+                    {"options", 772, 142, nullptr}, {"touchpad_left", 460, 190, "Pad L"}, {"touchpad_right", 640, 190, "Pad R"},
+                    {"l3", 378, 392, "L3"}, {"r3", 728, 392, "R3"},
+                    {"dpad_up", 207, 185, nullptr}, {"dpad_down", 207, 315, nullptr},
+                    {"dpad_left", 140, 250, nullptr}, {"dpad_right", 275, 250, nullptr},
+                    {"triangle", 894, 167, nullptr}, {"circle", 974, 248, nullptr}, {"cross", 894, 328, nullptr}, {"square", 814, 248, nullptr},
+                };
+                for (const Hot& h : hot) controls.Cap(controls.IndexOf(h.key), {o.x + h.x * sc, o.y + h.y * sc}, h.prefix);
+                ImGui::SetCursorPos({16.f, 10.f + 742.f * sc + 4.f});
+                controls.DrawResets();
+                ImGui::SetCursorPos({16.f, 10.f + 742.f * sc + 36.f});
+                controls.DrawNote();
+                ImGui::SetCursorPos({kListX + 8.f, 8.f});
+                ImGui::BeginChild("##ctl_list", {avail.x - kListX - 12.f, avail.y - 16.f}, false, ImGuiWindowFlags_NoBackground);
+                controls.DrawMouse();
+                for (const char* g : {"Movement (left stick)", "Camera keys (right stick)", "Weapon slots"}) controls.DrawGroup(g);
+                ImGui::EndChild();
+            } else {
+                controls.Draw();
+            }
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            ImGui::PushTextWrapPos(kCol - 20);
-            ImGui::TextUnformatted("Changes are saved immediately and also apply to a running game within a second. The in-game menu (Insert) has the same Controls tab.");
-            ImGui::PopTextWrapPos();
+            ImGui::SetCursorPos({16.f, avail.y - 20.f});
+            ImGui::TextUnformatted("Click a label on the controller, then press a key. Changes save at once and reach a running game within a second.");
             ImGui::PopStyleColor();
-            ImGui::EndChild();
         } else {
             ImGui::BeginChild("##opts", {0, 0}, false, ImGuiWindowFlags_NoBackground);
             section("DISPLAY");
@@ -732,9 +773,9 @@ int main(int, char**) {
         // Tab buttons, bottom left.
         ImGui::SetCursorPos({left, kH - 74.f});
         if (fonts.bold) ImGui::PushFont(fonts.bold, 18.f);
-        if (nf_button("LAUNCHER", {140, 46}, tab == 0)) tab = 0;
+        if (nf_button("LAUNCHER", {140, 46}, tab == 0)) { tab = 0; controls.CancelCapture(); }
         ImGui::SameLine(0, 12);
-        if (nf_button("OPTIONS", {140, 46}, tab == 1)) tab = 1;
+        if (nf_button("OPTIONS", {140, 46}, tab == 1)) { tab = 1; controls.CancelCapture(); }
         ImGui::SameLine(0, 12);
         if (nf_button("CONTROLS", {140, 46}, tab == 2)) { tab = 2; controls.CancelCapture(); }
         if (fonts.bold) ImGui::PopFont();
@@ -753,7 +794,7 @@ int main(int, char**) {
         const float sx = float(ow) / kW, sy = float(oh) / kH;
         if (background) { SDL_FRect d{0, 0, float(ow), float(oh)}; SDL_RenderTexture(renderer, background, nullptr, &d); }
         if (gradient) { SDL_FRect d{0, 0, float(ow), float(oh)}; SDL_RenderTexture(renderer, gradient, nullptr, &d); }
-        if (logo) {
+        if (logo && tab != 2) {
             const float lw = 390.f, lh = lw * 249.f / 720.f;
             SDL_FRect d{34.f * sx, 22.f * sy, lw * sx, lh * sy};
             SDL_RenderTexture(renderer, logo, nullptr, &d);
