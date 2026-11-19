@@ -40,8 +40,8 @@ inline const Binding kBindings[] = {
     {"circle", "Circle", SDL_SCANCODE_LSHIFT, "Buttons"},
     {"square", "Square", SDL_SCANCODE_E, "Buttons"},
     {"triangle", "Triangle", SDL_SCANCODE_Q, "Buttons"},
-    {"l1", "L1", SDL_SCANCODE_1, "Buttons"},
-    {"r1", "R1", SDL_SCANCODE_3, "Buttons"},
+    {"l1", "L1", SDL_SCANCODE_LCTRL, "Buttons"},
+    {"r1", "R1", SDL_SCANCODE_G, "Buttons"},
     {"l2", "L2", SDL_SCANCODE_R, "Buttons"},
     {"r2", "R2", SDL_SCANCODE_F, "Buttons"},
     {"l3", "L3 (left stick click)", SDL_SCANCODE_Z, "Buttons"},
@@ -53,18 +53,17 @@ inline const Binding kBindings[] = {
     {"dpad_down", "D-pad down", SDL_SCANCODE_K, "D-pad"},
     {"dpad_left", "D-pad left", SDL_SCANCODE_J, "D-pad"},
     {"dpad_right", "D-pad right", SDL_SCANCODE_L, "D-pad"},
-    {"weapon1", "Weapon slot 1", SDL_SCANCODE_KP_1, "Weapon slots"},
-    {"weapon2", "Weapon slot 2", SDL_SCANCODE_KP_2, "Weapon slots"},
-    {"weapon3", "Weapon slot 3", SDL_SCANCODE_KP_3, "Weapon slots"},
-    {"weapon4", "Weapon slot 4", SDL_SCANCODE_KP_4, "Weapon slots"},
-    {"weapon5", "Weapon slot 5", SDL_SCANCODE_KP_5, "Weapon slots"},
-    {"weapon6", "Weapon slot 6", SDL_SCANCODE_KP_6, "Weapon slots"},
-    {"weapon7", "Weapon slot 7", SDL_SCANCODE_KP_7, "Weapon slots"},
-    {"weapon8", "Weapon slot 8", SDL_SCANCODE_KP_8, "Weapon slots"},
+    {"weapon1", "Weapon slot 1", SDL_SCANCODE_1, "Weapon slots"},
+    {"weapon2", "Weapon slot 2", SDL_SCANCODE_2, "Weapon slots"},
+    {"weapon3", "Weapon slot 3", SDL_SCANCODE_3, "Weapon slots"},
+    {"weapon4", "Weapon slot 4", SDL_SCANCODE_4, "Weapon slots"},
+    {"weapon5", "Weapon slot 5", SDL_SCANCODE_5, "Weapon slots"},
+    {"weapon6", "Weapon slot 6", SDL_SCANCODE_6, "Weapon slots"},
+    {"weapon7", "Weapon slot 7", SDL_SCANCODE_7, "Weapon slots"},
+    {"weapon8", "Weapon slot 8", SDL_SCANCODE_8, "Weapon slots"},
 };
 /// Default pad buttons each weapon slot presses (the switch button is added to all of them).
-inline const char* const kWeaponDefaults[8] = {"triangle", "triangle+circle", "circle", "circle+cross",
-                                               "cross", "cross+square", "square", "square+triangle"};
+inline const char* const kWeaponDefaults[8] = {"square", "cross", "circle", "triangle", "square+triangle", "square+cross", "circle+triangle", "circle+cross"};
 inline constexpr int kBindingCount = int(sizeof(kBindings) / sizeof(kBindings[0]));
 
 struct PsName { const char* key; const char* label; };

@@ -25,6 +25,7 @@
 #include "imgui_internal.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
+#include <atomic>
 #include "ps4rt_png.h"
 #include "ps4rt_controls.h"
 #include "ps4rt_controller_png.h"
@@ -271,9 +272,10 @@ static HANDLE spawn_launcher(const fs::path& root, const std::vector<std::string
     return pi.hProcess;
 }
 
+static std::atomic<int> g_drag_height{64};   // the Controls tab has key labels near the top, so it uses a thin strip
 static SDL_HitTestResult SDLCALL hit_test(SDL_Window*, const SDL_Point* p, void*) {
     // Drag from the top strip, except over the minimize/close buttons.
-    if (p->y < 64 && p->x < kW - 120) return SDL_HITTEST_DRAGGABLE;
+    if (p->y < g_drag_height.load() && p->x < kW - 120) return SDL_HITTEST_DRAGGABLE;
     return SDL_HITTEST_NORMAL;
 }
 #endif
@@ -535,6 +537,7 @@ int main(int, char**) {
 
         const float left = 36.f, top = 188.f;
         const bool wide = tab == 2;   // the Controls tab uses the whole window (no logo)
+        g_drag_height = wide ? 12 : 64;
         ImGui::SetCursorPos(wide ? ImVec2{20.f, 16.f} : ImVec2{left, top});
         ImGui::BeginChild("##content", wide ? ImVec2{kW - 40.f, kH - 16.f - 90.f} : ImVec2{kCol, kH - top - 96.f}, false, ImGuiWindowFlags_NoBackground);
 

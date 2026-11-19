@@ -186,7 +186,7 @@ static ButtonMap pad_map={{
 },15};
 static ButtonMap key_map={{
     {SDL_SCANCODE_SPACE,BTN_CROSS}, {SDL_SCANCODE_LSHIFT,BTN_CIRCLE}, {SDL_SCANCODE_E,BTN_SQUARE},
-    {SDL_SCANCODE_Q,BTN_TRIANGLE}, {SDL_SCANCODE_1,BTN_L1}, {SDL_SCANCODE_3,BTN_R1},
+    {SDL_SCANCODE_Q,BTN_TRIANGLE}, {SDL_SCANCODE_LCTRL,BTN_L1}, {SDL_SCANCODE_G,BTN_R1},
     {SDL_SCANCODE_R,BTN_L2}, {SDL_SCANCODE_F,BTN_R2}, {SDL_SCANCODE_Z,BTN_L3}, {SDL_SCANCODE_C,BTN_R3},
     {SDL_SCANCODE_RETURN,BTN_OPTIONS}, {SDL_SCANCODE_TAB,CLICK_LEFT}, {SDL_SCANCODE_BACKSPACE,CLICK_RIGHT},
     {SDL_SCANCODE_I,BTN_UP}, {SDL_SCANCODE_K,BTN_DOWN}, {SDL_SCANCODE_J,BTN_LEFT}, {SDL_SCANCODE_L,BTN_RIGHT},
@@ -213,10 +213,10 @@ static const struct { const char *key, *ps; } key_actions[]={
  * weapon_hold_ms so a quick tap still lasts a few frames; weapon_stagger_ms holds the switch button
  * alone for that long before the others join. */
 typedef struct { int key; uint32_t buttons; int was; uint64_t down_at, until; } WeaponSlot;
-static WeaponSlot wslot[8]={
-    {SDL_SCANCODE_KP_1,BTN_TRIANGLE},{SDL_SCANCODE_KP_2,BTN_TRIANGLE|BTN_CIRCLE},{SDL_SCANCODE_KP_3,BTN_CIRCLE},
-    {SDL_SCANCODE_KP_4,BTN_CIRCLE|BTN_CROSS},{SDL_SCANCODE_KP_5,BTN_CROSS},{SDL_SCANCODE_KP_6,BTN_CROSS|BTN_SQUARE},
-    {SDL_SCANCODE_KP_7,BTN_SQUARE},{SDL_SCANCODE_KP_8,BTN_SQUARE|BTN_TRIANGLE}};
+static WeaponSlot wslot[8]={   /* the game's own shortcut layout: 1 Square, 2 Cross, 3 Circle, 4 Triangle, 5 Square+Triangle, ... */
+    {SDL_SCANCODE_1,BTN_SQUARE},{SDL_SCANCODE_2,BTN_CROSS},{SDL_SCANCODE_3,BTN_CIRCLE},
+    {SDL_SCANCODE_4,BTN_TRIANGLE},{SDL_SCANCODE_5,BTN_SQUARE|BTN_TRIANGLE},{SDL_SCANCODE_6,BTN_SQUARE|BTN_CROSS},
+    {SDL_SCANCODE_7,BTN_CIRCLE|BTN_TRIANGLE},{SDL_SCANCODE_8,BTN_CIRCLE|BTN_CROSS}};
 static uint32_t wswitch=BTN_R1;
 static int whold_ms=80, wstagger_ms=0;
 static void weapon_apply(PadData *d, const bool *k) {
