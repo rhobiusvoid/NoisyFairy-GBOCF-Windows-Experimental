@@ -1,9 +1,11 @@
 /* libScePad on SDL3 gamepads, with a keyboard fallback. SDL events are pumped
  * by the window thread (gpu/shim/window.cpp); here state is only sampled.
  *
- * Default keyboard layout (PS4RT_KEY_MAP changes the buttons, see apply_button_map):
+ * Default keyboard layout (every key is rebindable: ps4rt_mouse.ini key_* lines, the launcher's
+ * Controls tab or the Insert menu; PS4RT_KEY_MAP also changes the buttons, see apply_button_map):
  *   WASD left stick, arrow keys right stick, Space Cross, LShift Circle,
- *   E Square, Q Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, C R3,
+ *   E Square, Q Triangle, Left Ctrl L1, G R1, R L2, F R2, Z L3, C R3,
+ *   1-8 weapon slots (the switch button plus the slot's face-button combination),
  *   Enter Options, Tab left touchpad (photo mode), Backspace right touchpad (pause menu),
  *   IJKL d-pad (I up, K down, J left, L right). */
 #define _GNU_SOURCE

@@ -41,7 +41,7 @@ class PlayerRestartTests(unittest.TestCase):
     def test_launcher_restarts_selected_game(self):
         launcher = (ROOT / "scripts/ps4rt_launch.py").read_text()
         self.assertIn("'--game', str(game)", launcher)
-        self.assertIn("env['PS4RT_RESTART_COMMAND'] = shlex.join(restart)", launcher)
+        self.assertIn("env['PS4RT_RESTART_COMMAND'] = _join_command(restart)", launcher)
         self.assertIn("restart += ['--upscaler', args.upscaler]", launcher)
 
     def test_gpu_descriptors_are_closed_at_exec(self):

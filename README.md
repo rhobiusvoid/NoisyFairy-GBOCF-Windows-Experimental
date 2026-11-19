@@ -39,6 +39,10 @@ Requirements: Windows 10 1803+ (64-bit) and a Vulkan 1.3 GPU. Full guide: [Runni
 
 See [Player update and volume-key setup](docs/PLAYER_PKG_SETUP.md) for details (it also lists command-line alternatives for advanced users).
 
+### Keyboard and mouse
+
+Keyboard and mouse play works out of the box (mouse look is on by default and does not affect controller players). Every key and mouse button can be rebound in the launcher's **Controls** tab or in the in-game menu (**Insert**), and the number keys **1-8** switch weapon slots like the official PC layout. Settings live in `ps4rt_mouse.ini` next to `ps4rt.ini`; **F8** toggles mouse capture.
+
 ### Graphics and controls
 
 Choose your settings on the launcher's **Options** tab before you start; they are saved immediately and apply on the next launch. The same settings are available in-game: open the PS4RT menu with **Insert** on the keyboard, or **hold L2 and click R3** on a controller. Use the D-pad to navigate, Cross to select, and Circle to return. The menu separates **Graphics** from **Achievements**, with Code Fairy's compact two-tab layout. The Graphics page also provides FPS and game-related controls.
@@ -57,7 +61,16 @@ See [Running on Windows](docs/RUNNING_WINDOWS.md) for details.
 
 ## Current compatibility status
 
-**Windows port:** tested on Windows 10 with a GTX 1050 Ti. It boots to the main menu and plays through the Chapter 1 tutorial; trophy unlocks no longer crash, and save data loads correctly after restart. Boots on GTX 10-series, RTX 30/50-series and AMD cards (0.7 Beta). A rare, random black-screen stall at boot has been seen; see the note under Download and play. Chapters beyond that and Volume 2/3 are untested on Windows, and the port is still a beta: expect rough edges.
+**Windows port (0.7 Beta):** it boots to the main menu, plays through the Chapter 1 tutorial and has been played in long sessions; trophy unlocks and save data work. Chapters beyond that and Volume 2/3 are untested on Windows, and the port is still a beta: expect rough edges.
+
+| Hardware | Result |
+|---|---|
+| GTX 1050 Ti (Windows 10) | Plays; Pascal model glitches (see Known limitations) |
+| GTX 1650 Ti | Plays through long sessions; occasional colour-change texture noise when video memory runs out |
+| GTX 10-series, RTX 30/50-series, AMD cards | Reported to boot (0.7 Beta) |
+| Radeon 9070 XT + Ryzen 9700X (Linux build, Hekami) | Tested through Chapter 9 |
+
+A rare, random black-screen stall at boot has been seen; see the note under Download and play.
 
 **Original Linux build (by Hekami):** playable and tested through Chapter 9 (Volume 2) on a Radeon 9070XT and Ryzen 9700X, covering the tutorial, story missions, combat and bosses, cutscenes, menus, saving/loading and completion of Volume 1. Volume 3 has not been fully gameplay-tested. Screenshots document a particular configuration, not a performance guarantee.
 
@@ -69,6 +82,10 @@ Known limitations and notes:
 - FPS depends heavily on GPU power, internal resolution, graphics-quality preset and shader/cache state.
 - **Older GPUs (Pascal / GTX 10-series and earlier) may show model glitches**: on a GTX 1050 Ti, weapon and shoulder parts on some Zakus (Chapter 1) render with missing polygons or colored dots until the camera gets close. The cause appears to be GPU-side (a compute shader that builds the recolored textures), not a setting. Toggling the optimization, MSAA, barrier and interpolation options made no difference. Newer GPUs are expected to be better; reports welcome.
 - **CPUs older than Coffee Lake (or equivalent) may be missing required functions** Another user tested with an i5-3470, which is missing MOVBE, BMI1, and LZCNT instructions. Your mileage may vary. If your CPU is too old, there's no real chance for support.
+- **Pascal glitches will not be fixed:** a fix would risk breaking newer GPUs.
+- **Low video memory:** on 4 GB cards the texture cache can run out of room and drop old GPU-written textures, which shows up as occasional rainbow noise on colour-changing suit textures. It trades that for not crashing with an out-of-memory error.
+- **Rare boot stall:** the game restarts itself and usually recovers (`PS4RT_BOOT_RETRIES=0` turns this off). If it happens, open an issue with your GPU, driver and newest log; this repository's build also carries the hang dump (written when the launcher's log option is on) for investigating it.
+- **Overlay hooks** (for example OBS game capture) can change timing and may make stalls more likely.
 - **Backups:** the `savedata-backups` snapshot copy is best-effort; saving itself does not depend on it.
 - **Known deadlock risk** in the model manager (Chapters 1, 3, 5 per Hekami); see [WINDOWS-MUTEX-NOTES.md](docs/WINDOWS-MUTEX-NOTES.md).
 - **DLSS is not available** in Windows builds (FSR 1/3.1/4 are).
@@ -78,7 +95,7 @@ Please report reproducible defects on the **published project's GitHub Issues pa
 
 ## Build from source (developers)
 
-Players should use a release. The Windows binaries are **cross-compiled from Linux** with clang and MinGW-w64; see [docs/windows-build/NOTES.md](docs/windows-build/NOTES.md), `docs/windows-build/link.sh` and `docs/windows-build/toolchain-clang-mingw.cmake`. There is no native Windows build script yet.
+You do not have to trust the prebuilt executables: **[BUILDING.md](BUILDING.md)** explains how to build everything from this repository, and `scripts/build-windows.sh` does it in one command (Linux, or WSL2 on Windows). This repository keeps the developer tooling that the clean public release has removed (hang dump, stick sweep, warm-up debug switches); `DIAGNOSTICS=1` additionally enables upstream's own `PS4RT_DIAGNOSTICS` tooling. Run the tests with `python3 -m unittest discover -s tests -p 'test_*.py'`; CI does the same on every push. See also [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 Generated state lives under `out\CUSA28763\` (prepared game code, saves, trophies, caches, volume keys). **Never publish or commit `out\`.** See [Windows data layout](docs/WINDOWS_DATA_LAYOUT.md).
 
@@ -88,7 +105,9 @@ Generated state lives under `out\CUSA28763\` (prepared game code, saves, trophie
 - [Update and volume-key setup](docs/PLAYER_PKG_SETUP.md)
 - [Windows package and data layout](docs/WINDOWS_DATA_LAYOUT.md)
 - [Mutex/deadlock notes](docs/WINDOWS-MUTEX-NOTES.md)
-- [Cross-build notes](docs/windows-build/NOTES.md)
+- [Building from source](BUILDING.md) and [why the flags are what they are](docs/BUILD-NOTES.md)
+- [Environment variables](docs/ENVIRONMENT.md) (generated)
+- [Release notes](docs/release-notes/)
 - [Upstream source credits and licensing](docs/UPSTREAM_CREDITS.md)
 
 ## Credits and licensing

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    name: Tests and repository checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Environment variable docs are current
+        run: python3 scripts/gen_env_docs.py --check
+      - name: Large file guard
+        run: python3 scripts/check_repo_size.py
+      - name: Build script syntax
+        run: bash -n scripts/build-windows.sh
+
+  windows-build:
+    name: Cross-build the Windows executables
+    runs-on: ubuntu-24.04
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld cmake ninja-build pkg-config git curl unzip make \
+            python3 python3-pil mingw-w64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \
+            libboost-dev libvulkan-memory-allocator-dev glslang-tools
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            build-win/src
+            build-win/prefix
+            build-win/obj/*.done
+            build-win/ffmpeg
+          key: deps-${{ hashFiles('scripts/build-windows.sh') }}
+      - name: Build
+        run: scripts/build-windows.sh
+      - name: Upload executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executables
+          path: build-win/out/*.exe

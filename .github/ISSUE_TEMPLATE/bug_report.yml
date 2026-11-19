@@ -1,0 +1,52 @@
+name: Bug report
+description: Something crashes, glitches, stalls or does not work
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the Known issues in the README first. Game files, keys and logs that contain them must not be posted.
+  - type: input
+    id: version
+    attributes:
+      label: NoisyFairy version
+      placeholder: "0.7 Beta"
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      placeholder: "GTX 1650 Ti, 576.80"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened
+      options:
+        - Black screen / never reaches the Bandai Namco logo (boot stall)
+        - Crash or freeze during play
+        - Graphics glitch
+        - Controls / keyboard and mouse
+        - Launcher or setup problem
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did and what you expected
+      description: Chapter / mission, game version (v01.03), and what changed just before it happened.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Attach the newest file from out\CUSA28763\user\log (the launcher writes one by default). Drag it into this box.

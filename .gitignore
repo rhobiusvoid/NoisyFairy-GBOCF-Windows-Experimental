@@ -7,6 +7,14 @@
 !/build.sh
 !/run.sh
 !/port_features.json
+!/BUILDING.md
+!/SECURITY.md
+!/CONTRIBUTING.md
+!/NoisyFairy.bat
+!/Play-Game.bat
+!/launcher/
+!/res/
+!/.github/
 !/src/
 !/gpu/
 !/scripts/
@@ -336,3 +344,8 @@ secrets*
 
 # Local developer diagnostics, not public port source.
 /tools/
+
+# Launcher artwork and font ship with the game package.
+!/launcher/*.png
+!/launcher/*.ttf
+!/res/*.png
