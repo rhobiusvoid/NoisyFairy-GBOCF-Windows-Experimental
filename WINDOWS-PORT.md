@@ -15,12 +15,9 @@ history is not included here, this is a snapshot of upstream plus the port chang
 - Prebuilt package: see Releases. Requires Windows 10 1803+, Vulkan 1.3 GPU. Bring your own game files and keys.
 
 ## Download and run
-1. Get all `NoisyFairy-0.7-Beta.zip.partNN.bin` files from the Releases page into one folder.
-2. Join them in cmd (adjust the list if there are more or fewer parts):
-   `copy /b NoisyFairy-0.7-Beta.zip.part00.bin+NoisyFairy-0.7-Beta.zip.part01.bin+NoisyFairy-0.7-Beta.zip.part02.bin+NoisyFairy-0.7-Beta.zip.part03.bin NoisyFairy-0.7-Beta.zip`
-   The exact size and SHA-256 are listed in the release notes on the Releases page.
-3. Unzip to a short writable path, then double-click `NoisyFairy.bat`, pick your extracted `CUSA28763` folder and press Play.
-4. Keep the v01.03 update PKG and the three volume-key PKGs as `.pkg` files; install them via the setup window or **Install Volume Keys...** on the launcher.
+1. Download `NoisyFairy-0.7-Beta.zip` from the Releases page (the SHA-256 is in the release notes).
+2. Unzip to a short writable path, then double-click `NoisyFairy.bat`, pick your **already extracted** `CUSA28763` folder (it must contain `eboot.bin` and `sce_sys\param.sfo`) and press Play.
+3. Keep the v01.03 update PKG and the three volume-key PKGs as `.pkg` files; install them via the setup window or **Install Volume Keys...** on the launcher.
 
 The game should start within a few seconds. A black screen that never shows the Bandai Namco logo is a stall: close the game and report it on the Issues tab with the newest log from `out\CUSA28763\user\log`.
 

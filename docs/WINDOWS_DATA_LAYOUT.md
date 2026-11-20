@@ -5,7 +5,7 @@
 | Path | Contents |
 | --- | --- |
 | `Play-Game.bat` | Launcher entry point |
-| `bin\` | `ps4rt.exe` (runtime), `ps4rt-setup.exe` (setup window), `ps4rt-pkg.exe` (PKG extractor), DLLs |
+| `bin\` | `ps4rt.exe` (runtime), `ps4rt-setup.exe` (setup window), `ps4rt-pkg.exe` (update / add-on PKG extractor; not for the base game), DLLs |
 | `python\` | Bundled Python used by the launcher scripts |
 | `scripts\` | Launcher and setup scripts |
 | `gpu\assets\`, `fsr4_shaders\` | Overlay art and FSR 4 shader data |

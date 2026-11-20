@@ -16,7 +16,7 @@ PS4RT neither supplies these files nor bypasses the game's volume locks. No PS4 
 
 ## Download and play
 
-1. Download the latest build from the **Releases** page (if it is split in parts, follow [WINDOWS-PORT.md](WINDOWS-PORT.md) to join them) and extract it to a short, writable path such as `C:\CodeFairy\`.
+1. Download the latest build from the **Releases** page and extract it to a short, writable path such as `C:\CodeFairy\`.
 2. Double-click **`NoisyFairy.bat`** to open the launcher.
 3. On the **Launcher** tab, press **Browse**, pick your extracted `CUSA28763` folder, then press **Play**. The folder is remembered for next time.
 4. If your game is v01.00, a setup window asks for your v01.03 update PKG on the first launch. Install your three volume keys with **Install Volume Keys...** (the button disappears once they are installed), then restart the game.

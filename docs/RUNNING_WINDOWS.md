@@ -16,13 +16,12 @@ them. Releases contain no game data, firmware, PKGs or saves.
 
 ## 1. Get the package
 
-1. Download the release from the **Releases** page. If it is split into parts, put every part in one folder and
-   join them in `cmd`, as described in [WINDOWS-PORT.md](../WINDOWS-PORT.md). Check the size it states.
+1. Download `NoisyFairy-0.7-Beta.zip` from the **Releases** page and check the SHA-256 in the release notes.
 2. Extract it to a **writable folder with a short path**, for example `C:\CodeFairy\`. Avoid `Program Files`.
    Keep all files together.
-3. Extract your own game PKG. This port reads the plaintext folder (it contains `eboot.bin`,
-   `sce_sys\param.sfo`, `sce_module\`).
-   The bundled `bin\ps4rt-pkg.exe` can do this; see [Update and volume-key setup](PLAYER_PKG_SETUP.md).
+3. Have your game as an **already extracted folder** (it contains `eboot.bin`, `sce_sys\param.sfo`, `sce_module\`).
+   PS4RT cannot extract the base game: the bundled `bin\ps4rt-pkg.exe` only handles update and add-on (volume key) PKGs,
+   not base-game ("gd") packages. Extract the base game with a tool such as shadPS4.
 
 ## 2. First launch
 

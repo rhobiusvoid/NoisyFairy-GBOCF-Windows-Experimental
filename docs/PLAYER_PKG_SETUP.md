@@ -2,11 +2,11 @@
 
 **Code Fairy PS4RT requires CUSA28763 v01.03 and uses three episodic volume unlock keys.** To access the full campaign, obtain **(1) the extracted game, (2) its matching v01.03 update if not already applied, and (3) all three volume unlock-key PKGs**. These keys unlock story content; they are **not optional DLC**. PS4RT neither bypasses the volume locks nor supplies any keys.
 
-The portable runtime includes a native PKG parser and graphical setup utility. No separate PS4 emulator or extractor is required. The game, update and volume-key packages are **not** bundled or downloaded by PS4RT. The generic UI still says **Install DLC...** because the keys use the same PS4 add-on package format.
+The portable runtime includes a native PKG parser and graphical setup utility. No separate extractor is required for the update and volume keys, but the base game must already be extracted (see below). The game, update and volume-key packages are **not** bundled or downloaded by PS4RT. The generic UI still says **Install DLC...** because the keys use the same PS4 add-on package format.
 
 ## First launch
 
-1. Have your own extracted plaintext `CUSA28763` folder, containing `eboot.bin` and `sce_sys\param.sfo`. To extract a game PKG yourself, run `bin\ps4rt-pkg.exe "C:\path\to\game.pkg" "C:\path\to\output-folder"`.
+1. Have your own extracted plaintext `CUSA28763` folder, containing `eboot.bin` and `sce_sys\param.sfo`. The bundled `bin\ps4rt-pkg.exe` does **not** accept base-game ("gd") packages, only updates and add-ons, so extract the base game with another tool (for example shadPS4).
 2. Extract the PS4RT Windows package into a writable folder (for example `C:\CodeFairy\`).
 3. Open a `cmd` window in that folder and run:
 

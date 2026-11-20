@@ -17,10 +17,9 @@ Windows port of the PS4 runtime for Mobile Suit Gundam Battle Operation Code Fai
 - Fine mouse aim on diagonals and per-MS camera speeds are still being measured; please report anything that feels off.
 
 ## Install
-1. Download all `NoisyFairy-0.7-Beta.zip.partNN.bin` files into one folder.
-2. In cmd: `copy /b NoisyFairy-0.7-Beta.zip.part00.bin+NoisyFairy-0.7-Beta.zip.part01.bin+NoisyFairy-0.7-Beta.zip.part02.bin+NoisyFairy-0.7-Beta.zip.part03.bin NoisyFairy-0.7-Beta.zip`
-3. Verify: 93651860 bytes, SHA-256 0e4630aff3feef5de2a01083bd7cf27ff81abf8c9226efeb8d65b99f74c23bcf
-4. Unzip to a short writable path, run `NoisyFairy.bat`, pick your extracted `CUSA28763` folder, press Play.
+1. Download `NoisyFairy-0.7-Beta.zip` from the Releases page.
+2. Verify: 93651860 bytes, SHA-256 0e4630aff3feef5de2a01083bd7cf27ff81abf8c9226efeb8d65b99f74c23bcf
+3. Unzip to a short writable path, run `NoisyFairy.bat`, pick your extracted `CUSA28763` folder, press Play.
 
 You need your own extracted CUSA28763 game, the v01.03 update (if your copy is older) and the three volume-key PKGs. No game files, keys or firmware are included. Requires Windows 10 1803+ and a Vulkan 1.3 GPU.
 
