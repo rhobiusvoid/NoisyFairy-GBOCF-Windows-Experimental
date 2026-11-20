@@ -16,7 +16,7 @@ them. Releases contain no game data, firmware, PKGs or saves.
 
 ## 1. Get the package
 
-1. Download `NoisyFairy-0.7-Beta.zip` from the **Releases** page and check the SHA-256 in the release notes.
+1. Download `NoisyFairy-0.8-Beta.zip` from the **Releases** page and check the SHA-256 in the release notes.
 2. Extract it to a **writable folder with a short path**, for example `C:\CodeFairy\`. Avoid `Program Files`.
    Keep all files together.
 3. Have your game as an **already extracted folder** (it contains `eboot.bin`, `sce_sys\param.sfo`, `sce_module\`).

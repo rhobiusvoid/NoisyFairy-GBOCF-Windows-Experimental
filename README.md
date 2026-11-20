@@ -16,7 +16,7 @@ PS4RT neither supplies these files nor bypasses the game's volume locks. No PS4 
 
 ## Download and play
 
-1. Download the latest build from the **Releases** page and extract it to a short, writable path such as `C:\CodeFairy\`.
+1. Download the latest build (`NoisyFairy-0.8-Beta.zip`) from the **Releases** page and extract it to a short, writable path such as `C:\CodeFairy\`.
 2. Double-click **`NoisyFairy.bat`** to open the launcher.
 3. On the **Launcher** tab, press **Browse**, pick your extracted `CUSA28763` folder, then press **Play**. The folder is remembered for next time.
 4. If your game is v01.00, a setup window asks for your v01.03 update PKG on the first launch. Install your three volume keys with **Install Volume Keys...** (the button disappears once they are installed), then restart the game.
@@ -61,13 +61,13 @@ See [Running on Windows](docs/RUNNING_WINDOWS.md) for details.
 
 ## Current compatibility status
 
-**Windows port (0.7 Beta):** it boots to the main menu, plays through the Chapter 1 tutorial and has been played in long sessions; trophy unlocks and save data work. Chapters beyond that and Volume 2/3 are untested on Windows, and the port is still a beta: expect rough edges.
+**Windows port (0.8 Beta):** it boots to the main menu, plays through the Chapter 1 tutorial and has been played in long sessions; trophy unlocks and save data work. Chapters beyond that and Volume 2/3 are untested on Windows, and the port is still a beta: expect rough edges.
 
 | Hardware | Result |
 |---|---|
 | GTX 1050 Ti (Windows 10) | Plays; Pascal model glitches (see Known limitations) |
 | GTX 1650 Ti | Plays through long sessions; occasional colour-change texture noise when video memory runs out |
-| GTX 10-series, RTX 30/50-series, AMD cards | Reported to boot (0.7 Beta) |
+| GTX 10-series, RTX 30/50-series, AMD cards | Reported to boot (0.7 Beta and later) |
 | Radeon 9070 XT + Ryzen 9700X (Linux build, Hekami) | Tested through Chapter 9 |
 
 A rare, random black-screen stall at boot has been seen; see the note under Download and play.

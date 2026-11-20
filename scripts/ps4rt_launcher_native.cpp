@@ -33,7 +33,7 @@
 namespace fs = std::filesystem;
 
 static const char* kTitleId = "CUSA28763";
-static const char* kVersion = "0.7 Beta";
+static const char* kVersion = "0.8 Beta";
 static constexpr int kW = 1152, kH = 648;
 static constexpr float kCol = 452.0f;       // width of the left column
 static const ImVec4 kPurple{.60f, .27f, .88f, 1}, kPurpleHi{.70f, .38f, .95f, 1},
