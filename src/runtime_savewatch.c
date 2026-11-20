@@ -50,6 +50,35 @@ typedef struct { uintptr_t page; DWORD old; } Guarded;
 static Guarded *guarded;
 static size_t guarded_count, guarded_cap;
 
+/* Buffers the game read GAMESAVEFILE.DAT into (recorded by runtime_file.c). */
+#define MAX_READS 6
+static struct { uintptr_t addr; size_t size; } reads[MAX_READS];
+static int read_count;
+void runtime_savewatch_note_read(const void *buffer, size_t size) {
+    if (size < 1000000 || !buffer) return;
+    if (read_count < MAX_READS) { reads[read_count].addr = (uintptr_t)buffer; reads[read_count].size = size; ++read_count; }
+    printf("Runtime: save watch: save read into %p (%zu bytes)\n", buffer, size);
+}
+static void check_reads(const size_t *probe, int probes) {
+    for (int r = 0; r < read_count && copy_count < MAX_COPIES; ++r) {
+        uintptr_t base = reads[r].addr;
+        int ok = reads[r].size == file_size;
+        MEMORY_BASIC_INFORMATION mbi;
+        if (ok) ok = VirtualQuery((void *)base, &mbi, sizeof(mbi)) && mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS));
+        int match = 0;
+        if (ok) {
+            match = 1;
+            for (int i = 0; i < probes; ++i) if (memcmp((void *)(base + probe[i]), file_data + probe[i], 32)) { match = 0; break; }
+        }
+        printf("Runtime: save watch: read buffer %p %s\n", (void *)base, match ? "still holds the save" : "no longer holds the save");
+        if (!match) continue;
+        int dup = 0;
+        for (int c = 0; c < copy_count; ++c) if (copies[c].base == base) dup = 1;
+        if (dup) continue;
+        copies[copy_count].base = base; copies[copy_count].size = file_size; ++copy_count;
+    }
+}
+
 static int find_save_file(char *out, size_t size) {
     char base[600];
     snprintf(base, sizeof(base), "%s/savedata", runtime_file_user_dir());
@@ -121,34 +150,40 @@ static Guarded *guard_find(uintptr_t page) {
 
 /* Only pages that are already resident are read: touching committed-but-unused guest memory would
  * make Windows back several GB of zero pages and can freeze the machine. */
-static void search_runs(uintptr_t rb, uintptr_t re, const size_t *probe, int probes) {
-    uintptr_t run = 0;
-    for (uintptr_t page = rb; page <= re && copy_count < MAX_COPIES; page += 4096) {
-        int resident = 0;
-        if (page < re) {
-            PSAPI_WORKING_SET_EX_INFORMATION info = {(void *)page, {0}};
-            resident = K32QueryWorkingSetEx(GetCurrentProcess(), &info, sizeof(info)) && (info.VirtualAttributes.Flags & 1);
-        }
-        if (resident) { if (!run) run = page; continue; }
-        if (run && page - run >= file_size) {
-            for (uintptr_t p = run; p + 32 <= page; ) {
-                const uint8_t *hit = memchr((const void *)p, file_data[probe[0]], page - 32 - p + 1);
-                if (!hit) break;
-                p = (uintptr_t)hit + 1;
-                if (memcmp(hit, file_data + probe[0], 32)) continue;
-                uintptr_t base = (uintptr_t)hit - probe[0];
-                if (base < run || base + file_size > page || base == (uintptr_t)file_data) continue;
-                int match = 1;
-                for (int i = 1; i < probes; ++i) if (memcmp((void *)(base + probe[i]), file_data + probe[i], 32)) { match = 0; break; }
-                if (!match || copy_count >= MAX_COPIES) continue;
-                copies[copy_count].base = base;
-                copies[copy_count].size = file_size;
-                ++copy_count;
-                p = base + file_size;
-            }
-        }
-        run = 0;
+static void scan_run(uintptr_t run, uintptr_t page, const size_t *probe, int probes) {
+    for (uintptr_t p = run; p + 32 <= page; ) {
+        const uint8_t *hit = memchr((const void *)p, file_data[probe[0]], page - 32 - p + 1);
+        if (!hit) break;
+        p = (uintptr_t)hit + 1;
+        if (memcmp(hit, file_data + probe[0], 32)) continue;
+        uintptr_t base = (uintptr_t)hit - probe[0];
+        if (base < run || base + file_size > page || base == (uintptr_t)file_data) continue;
+        int match = 1;
+        for (int i = 1; i < probes; ++i) if (memcmp((void *)(base + probe[i]), file_data + probe[i], 32)) { match = 0; break; }
+        if (!match || copy_count >= MAX_COPIES) continue;
+        copies[copy_count].base = base;
+        copies[copy_count].size = file_size;
+        ++copy_count;
+        p = base + file_size;
     }
+}
+#define BATCH 2048
+static void search_runs(uintptr_t rb, uintptr_t re, const size_t *probe, int probes) {
+    static PSAPI_WORKING_SET_EX_INFORMATION info[BATCH];
+    uintptr_t run = 0;
+    for (uintptr_t base = rb; base < re && copy_count < MAX_COPIES; base += (uintptr_t)BATCH * 4096) {
+        size_t n = (re - base) / 4096;
+        if (n > BATCH) n = BATCH;
+        for (size_t i = 0; i < n; ++i) { info[i].VirtualAddress = (void *)(base + i * 4096); info[i].VirtualAttributes.Flags = 0; }
+        if (!K32QueryWorkingSetEx(GetCurrentProcess(), info, (DWORD)(n * sizeof(info[0])))) { run = 0; continue; }
+        for (size_t i = 0; i < n; ++i) {
+            uintptr_t page = base + i * 4096;
+            if (info[i].VirtualAttributes.Flags & 1) { if (!run) run = page; continue; }
+            if (run && page - run >= file_size) scan_run(run, page, probe, probes);
+            run = 0;
+        }
+    }
+    if (run && re - run >= file_size) scan_run(run, re, probe, probes);
 }
 static void search_memory(const size_t *probe, int probes) {
     SYSTEM_INFO si;
@@ -285,7 +320,8 @@ void runtime_savewatch_toggle(void) {
     if (probes < 2) { printf("Runtime: save watch: save file too empty to search for\n"); return; }
     copy_count = 0;
     printf("Runtime: save watch: searching memory for the save (resident pages only)...\n"); fflush(stdout);
-    search_memory(probe, probes);
+    check_reads(probe, probes);
+    if (!copy_count) search_memory(probe, probes);
     faults = 0; runaway = 0;
     if (!copy_count) { printf("Runtime: save watch: the save is not in memory as a plain copy (%s)\n", path); return; }
     free(events);
@@ -300,4 +336,5 @@ void runtime_savewatch_toggle(void) {
 }
 #else
 void runtime_savewatch_toggle(void) {}
+void runtime_savewatch_note_read(const void *buffer, size_t size) { (void)buffer; (void)size; }
 #endif

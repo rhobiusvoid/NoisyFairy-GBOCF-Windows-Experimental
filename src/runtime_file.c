@@ -345,12 +345,17 @@ static ssize_t read_to_guest(int host,void *buffer,uint64_t size,int64_t offset,
     errno=saved_errno;
     return n;
 }
+static void save_read_hook(int fd,const void *buffer,ssize_t n) {
+    const char *p=fd_path(fd);
+    if (p && n>1000000) { size_t l=strlen(p); if (l>=16 && !strcmp(p+l-16,"GAMESAVEFILE.DAT")) runtime_savewatch_note_read(buffer,(size_t)n); }
+}
 static int64_t do_read(int fd,void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     PS4RT_LOADING_EVENT(PS4RT_LOAD_READ_BEGIN, fd, size);
     ssize_t n=read_to_guest(h,buffer,size,0,0);
     save_trace(fd_path(fd),"read",(long long)size,(long long)n);
+    save_read_hook(fd,buffer,n);
     PS4RT_LOADING_EVENT(PS4RT_LOAD_READ_END, fd, n < 0 ? -errno : n);
     if (n < 0) PS4RT_LOADING_NOTE("file-read-failed fd=%d buffer=%p size=%llu error=%d",
                                 fd, buffer, (unsigned long long)size, errno);
@@ -364,6 +369,7 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     PS4RT_LOADING_EVENT(PS4RT_LOAD_READ_BEGIN, fd, size);
     ssize_t n=read_to_guest(h,buffer,size,offset,1);
     save_trace(fd_path(fd),"pread",(long long)size,(long long)n);
+    save_read_hook(fd,buffer,n);
     PS4RT_LOADING_EVENT(PS4RT_LOAD_READ_END, fd, n < 0 ? -errno : n);
     if (n < 0) PS4RT_LOADING_NOTE("file-pread-failed fd=%d buffer=%p size=%llu offset=%lld error=%d",
                                 fd, buffer, (unsigned long long)size, (long long)offset, errno);
