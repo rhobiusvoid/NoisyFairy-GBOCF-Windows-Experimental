@@ -29,6 +29,7 @@
 #include "ps4rt_png.h"
 #include "ps4rt_controls.h"
 #include "ps4rt_controller_png.h"
+#include "ps4rt_savepatch.h"
 
 namespace fs = std::filesystem;
 
@@ -461,6 +462,8 @@ int main(int, char**) {
     int tab = 0;
     bool log_to_file = launcher_ini.num("log_to_file", 1) != 0;
     std::string cache_message;
+    std::string save_message;
+    bool save_message_ok = true;
     bool child_dlc = false;
 #ifdef _WIN32
     HANDLE child = nullptr;
@@ -760,6 +763,28 @@ int main(int, char**) {
                     ImGui::SameLine(0, 12);
                     ImGui::AlignTextToFramePadding();
                     ImGui::TextUnformatted(cache_message.c_str());
+                }
+            }
+            section("SAVE DATA");
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::PushTextWrapPos(kCol - 20);
+                ImGui::TextUnformatted("Unlocks the six Situation Battles that the console version opens by linking GBO2 save data. Close the game first. A backup of your save is kept next to it.");
+                ImGui::PopTextWrapPos();
+                ImGui::PopStyleColor();
+                ImGui::BeginDisabled(busy);
+                if (nf_button("Unlock link battles", {200, 0})) {
+                    const savepatch::Outcome o = savepatch::unlock_link_battles(out_dir / "user", kTitleId);
+                    save_message = o.detail;
+                    save_message_ok = o.result == savepatch::Result::Patched || o.result == savepatch::Result::AlreadyUnlocked;
+                }
+                ImGui::EndDisabled();
+                if (!save_message.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, save_message_ok ? ImVec4(.50f, .95f, .60f, 1) : ImVec4(1, .62f, .62f, 1));
+                    ImGui::PushTextWrapPos(kCol - 20);
+                    ImGui::TextUnformatted(save_message.c_str());
+                    ImGui::PopTextWrapPos();
+                    ImGui::PopStyleColor();
                 }
             }
             ImGui::Dummy({0, 6});

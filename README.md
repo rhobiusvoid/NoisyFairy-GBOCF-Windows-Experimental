@@ -21,7 +21,7 @@ PS4RT neither supplies these files nor bypasses the game's volume locks. No PS4 
 3. On the **Launcher** tab, press **Browse**, pick your extracted `CUSA28763` folder, then press **Play**. The folder is remembered for next time.
 4. If your game is v01.00, a setup window asks for your v01.03 update PKG on the first launch. Install your three volume keys with **Install Volume Keys...** (the button disappears once they are installed), then restart the game.
 
-That's all you need: no command line required. The **Options** tab has the graphics settings and a **Write log file** switch (on by default) that saves a log to `out\CUSA28763\user\log` for bug reports.
+That's all you need: no command line required. The **Options** tab has the graphics settings and a **Write log file** switch (on by default) that saves a log to `out\CUSA28763\user\log` for bug reports. A **SAVE DATA** button there unlocks the six Situation Battles that the console version opens by linking GBO2 save data.
 
 **The game should start within a few seconds.** If it sits on a black screen and never shows the Bandai Namco logo, it has stalled: close it and report it on the **Issues** tab with the newest file from that log folder.
 

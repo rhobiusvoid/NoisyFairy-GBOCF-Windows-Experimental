@@ -30,6 +30,12 @@ The **Options** tab holds the graphics settings (the same ones as the in-game me
 (on by default) that saves everything the game prints to `out\CUSA28763\user\log`. The launcher returns when the game closes
 and shows the exit code if it crashed.
 
+**Unlocking the link Situation Battles:** six Situation Battles are normally opened on the console by linking GBO2 save
+data, which a PC has no way to do. Close the game, open the **Options** tab and press **Unlock link battles** under
+**SAVE DATA**. It sets the six unlock bits in your save (`GAMESAVEFILE.DAT`) and keeps a backup next to it
+(`GAMESAVEFILE.DAT.before-link-unlock`). The game must have created a save first, so start it once if the button says none
+was found.
+
 The command line does the same job. Open a `cmd` window in the extracted folder and run:
 
 ```bat
