@@ -74,7 +74,8 @@ Copy `build-win/package/NoisyFairy` to Windows and double-click `NoisyFairy.bat`
 6. Builds `ps4rt.exe` (the runtime), `ps4rt-launcher.exe`, `ps4rt-setup.exe` and `ps4rt-pkg.exe`.
    All four embed the NoisyFairy icon (`res/`).
 7. Assembles the package folder. The launcher needs an embedded Python for the helper scripts;
-   the script downloads the official Windows embeddable Python 3.12 from python.org for that.
+   the script downloads the official Windows embeddable Python 3.12.8 from python.org for that and
+   checks it against the MD5 python.org publishes (a mismatch stops the build).
    It also clears the high-entropy ASLR flag in the bundled DLLs (`scripts/clear_high_entropy_va.py`) so they load at
    low addresses; the runtime needs its guest address range free. The launcher repeats this as a fallback.
 

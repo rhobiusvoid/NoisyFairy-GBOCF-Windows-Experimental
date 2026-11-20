@@ -267,15 +267,23 @@ for dll in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do
     [ -n "$p" ] && cp "$p" "$PKG/bin/" || echo "warning: $dll not found; copy it from your MinGW-w64 install" >&2
 done
 # Embedded Python for the launcher's helper scripts (official python.org embeddable build).
-PYZIP=$WORK/python-embed.zip
+# python.org publishes an MD5 for each file; a wrong download is deleted, never used.
+PYVER=3.12.8
+PYMD5=1e86b04bc7d27c5c06edf8f617e1184a
+PYZIP=$WORK/python-$PYVER-embed-amd64.zip
 if [ ! -f "$PYZIP" ]; then
-    curl -fsSL https://www.python.org/ftp/python/3.12.8/python-3.12.8-embed-amd64.zip -o "$PYZIP" \
-        || { rm -f "$PYZIP"; echo "warning: could not download embedded Python; extract python-3.12.8-embed-amd64.zip into $PKG/python yourself" >&2; }
+    curl -fsSL "https://www.python.org/ftp/python/$PYVER/python-$PYVER-embed-amd64.zip" -o "$PYZIP" \
+        || { rm -f "$PYZIP"; echo "warning: could not download embedded Python; extract python-$PYVER-embed-amd64.zip into $PKG/python yourself" >&2; }
 fi
 if [ -f "$PYZIP" ]; then
+    if [ "$(md5sum "$PYZIP" | cut -d' ' -f1)" != "$PYMD5" ]; then
+        rm -f "$PYZIP"
+        die "embedded Python download does not match the MD5 python.org publishes for $PYVER; delete it and run again"
+    fi
     unzip -q -o "$PYZIP" -d "$PKG/python"
     # Without the ._pth file Python also searches the script's own folder, which the launcher scripts rely on.
     rm -f "$PKG"/python/python*._pth
+    [ -f "$PKG/python/python.exe" ] || die "embedded Python did not unpack (no python.exe in $PKG/python)"
 fi
 # Load everything low: clear the high-entropy ASLR flag in the shipped DLLs (the launcher does it again as a fallback).
 python3 "$ROOT/scripts/clear_high_entropy_va.py" "$PKG/bin"
