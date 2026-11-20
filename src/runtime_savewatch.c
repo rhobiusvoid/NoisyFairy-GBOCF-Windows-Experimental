@@ -10,7 +10,9 @@
  * guest code address, lets the one instruction run (trap flag) and protects the page again.
  * While armed the game is slow. Only PS4RT_SAVE_WATCH=1 enables the key. */
 #ifdef _WIN32
+#define PSAPI_VERSION 2
 #include <windows.h>
+#include <psapi.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +36,9 @@ static size_t file_size;
 static Event *events;
 static uint32_t event_count, order_counter;
 static uint64_t dropped;
+static volatile LONG64 faults;
+static volatile LONG runaway;
+#define MAX_FAULTS 400000 /* beyond this the game is hammering the save: stop instead of freezing */
 static uint32_t *table; /* open addressing: event index + 1 */
 #define TABLE_SIZE 262144u
 static CRITICAL_SECTION lock;
@@ -114,32 +119,51 @@ static Guarded *guard_find(uintptr_t page) {
     return NULL;
 }
 
+/* Only pages that are already resident are read: touching committed-but-unused guest memory would
+ * make Windows back several GB of zero pages and can freeze the machine. */
+static void search_runs(uintptr_t rb, uintptr_t re, const size_t *probe, int probes) {
+    uintptr_t run = 0;
+    for (uintptr_t page = rb; page <= re && copy_count < MAX_COPIES; page += 4096) {
+        int resident = 0;
+        if (page < re) {
+            PSAPI_WORKING_SET_EX_INFORMATION info = {(void *)page, {0}};
+            resident = K32QueryWorkingSetEx(GetCurrentProcess(), &info, sizeof(info)) && (info.VirtualAttributes.Flags & 1);
+        }
+        if (resident) { if (!run) run = page; continue; }
+        if (run && page - run >= file_size) {
+            for (uintptr_t p = run; p + 32 <= page; ) {
+                const uint8_t *hit = memchr((const void *)p, file_data[probe[0]], page - 32 - p + 1);
+                if (!hit) break;
+                p = (uintptr_t)hit + 1;
+                if (memcmp(hit, file_data + probe[0], 32)) continue;
+                uintptr_t base = (uintptr_t)hit - probe[0];
+                if (base < run || base + file_size > page || base == (uintptr_t)file_data) continue;
+                int match = 1;
+                for (int i = 1; i < probes; ++i) if (memcmp((void *)(base + probe[i]), file_data + probe[i], 32)) { match = 0; break; }
+                if (!match || copy_count >= MAX_COPIES) continue;
+                copies[copy_count].base = base;
+                copies[copy_count].size = file_size;
+                ++copy_count;
+                p = base + file_size;
+            }
+        }
+        run = 0;
+    }
+}
 static void search_memory(const size_t *probe, int probes) {
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     uintptr_t at = (uintptr_t)si.lpMinimumApplicationAddress, end = (uintptr_t)si.lpMaximumApplicationAddress;
+    const DWORD started = GetTickCount();
     MEMORY_BASIC_INFORMATION mbi;
     while (at < end && VirtualQuery((void *)at, &mbi, sizeof(mbi))) {
         uintptr_t rb = (uintptr_t)mbi.BaseAddress, re = rb + mbi.RegionSize;
         at = re;
+        if (GetTickCount() - started > 20000) { printf("Runtime: save watch: search stopped after 20 s\n"); return; }
         if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || !(mbi.Protect & (PAGE_READWRITE | PAGE_READONLY | PAGE_WRITECOPY)))
             continue;
         if (mbi.RegionSize < file_size) continue;
-        for (uintptr_t p = rb; p + 32 <= re && copy_count < MAX_COPIES; ) {
-            const uint8_t *hit = memchr((const void *)p, file_data[probe[0]], re - 32 - p + 1);
-            if (!hit) break;
-            p = (uintptr_t)hit + 1;
-            if (memcmp(hit, file_data + probe[0], 32)) continue;
-            uintptr_t base = (uintptr_t)hit - probe[0];
-            if (base < rb || base + file_size > re) continue;
-            int match = 1;
-            for (int i = 1; i < probes; ++i) if (memcmp((void *)(base + probe[i]), file_data + probe[i], 32)) { match = 0; break; }
-            if (!match || base == (uintptr_t)file_data) continue; /* our own host copy is not the game's */
-            copies[copy_count].base = base;
-            copies[copy_count].size = file_size;
-            ++copy_count;
-            p = base + file_size;
-        }
+        search_runs(rb, re, probe, probes);
     }
 }
 
@@ -200,6 +224,11 @@ int runtime_savewatch_fault(EXCEPTION_POINTERS *info) {
     uintptr_t addr = (uintptr_t)rec->ExceptionInformation[1], page = addr & ~(uintptr_t)4095;
     Guarded *g = guard_find(page);
     if (!g) return 0;
+    if (InterlockedIncrement64(&faults) > MAX_FAULTS) {
+        /* the game reads the save in bulk (a copy or scan of the whole struct): give the pages back */
+        if (!InterlockedExchange(&runaway, 1)) { armed = 0; for (size_t i = 0; i < guarded_count; ++i) { DWORD ig; VirtualProtect((void *)guarded[i].page, 4096, guarded[i].old, &ig); } }
+        return 1;
+    }
     record(addr, (uintptr_t)info->ContextRecord->Rip, rec->ExceptionInformation[0] == 1);
     DWORD ignore;
     VirtualProtect((void *)page, 4096, g->old, &ignore);
@@ -240,11 +269,13 @@ void runtime_savewatch_toggle(void) {
     if (!enabled) return;
     if (!lock_ready) { InitializeCriticalSection(&lock); lock_ready = 1; }
     if (tls_pending == TLS_OUT_OF_INDEXES) tls_pending = TlsAlloc();
-    if (armed) {
+    if (armed || runaway) {
+        if (runaway) printf("Runtime: save watch had stopped itself (more than %d faults: the game reads the save in bulk); writing what was recorded\n", MAX_FAULTS);
         armed = 0;
         Sleep(50);
         unprotect_all();
         write_report();
+        runaway = 0;
         return;
     }
     char path[1000];
@@ -253,7 +284,9 @@ void runtime_savewatch_toggle(void) {
     int probes = pick_probes(probe);
     if (probes < 2) { printf("Runtime: save watch: save file too empty to search for\n"); return; }
     copy_count = 0;
+    printf("Runtime: save watch: searching memory for the save (resident pages only)...\n"); fflush(stdout);
     search_memory(probe, probes);
+    faults = 0; runaway = 0;
     if (!copy_count) { printf("Runtime: save watch: the save is not in memory as a plain copy (%s)\n", path); return; }
     free(events);
     events = calloc(MAX_EVENTS, sizeof(Event));
