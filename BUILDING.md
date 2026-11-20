@@ -75,6 +75,8 @@ Copy `build-win/package/NoisyFairy` to Windows and double-click `NoisyFairy.bat`
    All four embed the NoisyFairy icon (`res/`).
 7. Assembles the package folder. The launcher needs an embedded Python for the helper scripts;
    the script downloads the official Windows embeddable Python 3.12 from python.org for that.
+   It also clears the high-entropy ASLR flag in the bundled DLLs (`scripts/clear_high_entropy_va.py`) so they load at
+   low addresses; the runtime needs its guest address range free. The launcher repeats this as a fallback.
 
 ## Verifying a binary
 

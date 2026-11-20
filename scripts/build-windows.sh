@@ -277,6 +277,8 @@ if [ -f "$PYZIP" ]; then
     # Without the ._pth file Python also searches the script's own folder, which the launcher scripts rely on.
     rm -f "$PKG"/python/python*._pth
 fi
+# Load everything low: clear the high-entropy ASLR flag in the shipped DLLs (the launcher does it again as a fallback).
+python3 "$ROOT/scripts/clear_high_entropy_va.py" "$PKG/bin"
 for item in LICENSE README.md WINDOWS-PORT.md BUILDING.md NoisyFairy.bat Play-Game.bat port_features.json \
             docs fsr4_shaders launcher; do
     cp -r "$ROOT/$item" "$PKG/"
