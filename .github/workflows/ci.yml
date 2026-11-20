@@ -28,7 +28,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld cmake ninja-build pkg-config git curl unzip make \
+          sudo apt-get install -y clang lld llvm cmake ninja-build pkg-config git curl unzip make \
             python3 python3-pil mingw-w64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \
             libboost-dev libvulkan-memory-allocator-dev glslang-tools
       - name: Cache dependencies

@@ -42,7 +42,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # ---------------------------------------------------------------- prerequisites
 step "Checking build tools"
 missing=()
-for t in clang clang++ ld.lld cmake ninja pkg-config git curl unzip python3 make \
+for t in clang clang++ ld.lld llvm-ar llvm-ranlib cmake ninja pkg-config git curl unzip python3 make \
          glslangValidator x86_64-w64-mingw32-gcc-posix x86_64-w64-mingw32-windres x86_64-w64-mingw32-dlltool; do
     command -v "$t" >/dev/null 2>&1 || missing+=("$t")
 done
@@ -52,7 +52,7 @@ python3 -c 'import PIL' 2>/dev/null || missing+=("python3-pil")
 if [ ${#missing[@]} -gt 0 ]; then
     echo "Missing: ${missing[*]}" >&2
     echo "On Ubuntu/Debian:" >&2
-    echo "  sudo apt install clang lld cmake ninja-build pkg-config git curl unzip python3 python3-pil make \\" >&2
+    echo "  sudo apt install clang lld llvm cmake ninja-build pkg-config git curl unzip python3 python3-pil make \\" >&2
     echo "       mingw-w64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \\" >&2
     echo "       libboost-dev libvulkan-memory-allocator-dev glslang-tools" >&2
     exit 1

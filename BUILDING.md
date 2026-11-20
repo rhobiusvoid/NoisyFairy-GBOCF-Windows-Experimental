@@ -12,7 +12,7 @@ A 64-bit Linux machine (tested on Ubuntu 24.04), about 10 GB of free disk and an
 connection. On Windows, use WSL2 with an Ubuntu 24.04 distribution; nothing else is required.
 
 ```sh
-sudo apt install clang lld cmake ninja-build pkg-config git curl unzip make \
+sudo apt install clang lld llvm cmake ninja-build pkg-config git curl unzip make \
      python3 python3-pil mingw-w64 gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \
      libboost-dev libvulkan-memory-allocator-dev glslang-tools
 ```
