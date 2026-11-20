@@ -278,6 +278,45 @@ static int cmp_events(const void *a, const void *b) {
     return x->offset < y->offset ? -1 : x->offset > y->offset;
 }
 
+static int cmp_u32(const void *a, const void *b) {
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return x < y ? -1 : x > y;
+}
+/* The code that touched the save, as raw bytes (merged windows around each address), so the checks
+ * can be read offline. Capped at 128 KB. */
+static void write_code(void) {
+    if (!event_count || !runtime_image_base) return;
+    uint32_t *rv = malloc(event_count * sizeof(*rv));
+    if (!rv) return;
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < event_count; ++i) rv[n++] = events[i].rip_rva;
+    qsort(rv, n, sizeof(*rv), cmp_u32);
+    char path[700];
+    snprintf(path, sizeof(path), "%s/savewatch_code.txt", runtime_file_user_dir());
+    FILE *f = fopen(path, "w");
+    if (!f) { free(rv); return; }
+    fprintf(f, "# image base %p; windows of guest code, one '@rva' line then hex. int3 (cc) bytes may be runtime patches.\n", (void *)runtime_image_base);
+    uint32_t total = 0, from = 0, to = 0;
+    for (uint32_t i = 0; i <= n; ++i) {
+        uint32_t lo = i < n ? (rv[i] > 0x80 ? rv[i] - 0x80 : 0) & ~15u : 0, hi = i < n ? rv[i] + 0x180 : 0;
+        if (i < n && to && lo <= to) { if (hi > to) to = hi; continue; }
+        if (to && total + (to - from) <= 131072) {
+            MEMORY_BASIC_INFORMATION mbi;
+            if (VirtualQuery((void *)(runtime_image_base + from), &mbi, sizeof(mbi)) && mbi.State == MEM_COMMIT &&
+                !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) && (uintptr_t)mbi.BaseAddress + mbi.RegionSize >= runtime_image_base + to) {
+                fprintf(f, "@%08x\n", from);
+                for (uint32_t k = from; k < to; ++k) fprintf(f, "%02x", *(volatile uint8_t *)(runtime_image_base + k));
+                fprintf(f, "\n");
+                total += to - from;
+            }
+        }
+        from = lo; to = hi;
+    }
+    fclose(f);
+    free(rv);
+    printf("Runtime: save watch: wrote %s (%u bytes of code)\n", path, total);
+}
+
 static void write_report(void) {
     char path[700];
     snprintf(path, sizeof(path), "%s/savewatch.txt", runtime_file_user_dir());
@@ -296,6 +335,7 @@ static void write_report(void) {
     }
     fclose(f);
     printf("Runtime: save watch: wrote %s (%u accesses)\n", path, event_count);
+    write_code();
 }
 
 void runtime_savewatch_toggle(void) {
