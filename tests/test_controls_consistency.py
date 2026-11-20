@@ -78,3 +78,15 @@ class Docs(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EnvironmentDocTest(unittest.TestCase):
+    def test_every_variable_has_a_purpose(self):
+        """A new PS4RT_* variable needs a source comment or an OVERRIDES entry in scripts/gen_env_docs.py."""
+        empty = []
+        for line in (ROOT / 'docs/ENVIRONMENT.md').read_text().splitlines():
+            if line.startswith('| `PS4RT_'):
+                cells = [c.strip() for c in line.strip('|').split('|')]
+                if not cells[1]:
+                    empty.append(cells[0])
+        self.assertEqual(empty, [], f'variables without a purpose: {empty}')
