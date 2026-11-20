@@ -5,7 +5,7 @@ Most of these are developer switches; players normally use the launcher or `ps4r
 The "purpose" column is the nearest source comment, so it may be terse or empty;
 the file column says where to read the real behaviour.
 
-97 variables.
+98 variables.
 
 | Variable | Purpose (from the source) | Read in |
 |---|---|---|
@@ -81,6 +81,7 @@ the file column says where to read the real behaviour.
 | `PS4RT_PRESET_FILE` | ps4rt: PS4RT_PRESET_FILE=<file> holding a preset number, read about once a second: switches | `gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp` |
 | `PS4RT_RENDER_RES` | keep guest allocations/UI native and change only host raster targets at frame boundaries. | `gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp`, `gpu/shim/ps4rt_settings.cpp` |
 | `PS4RT_RESTART_COMMAND` | run.py sets PS4RT_RESTART_COMMAND: the launch command line, started again (new patches). | `gpu/shim/ps4rt_overlay.cpp`, `src/loader.c` |
+| `PS4RT_SAVE_WATCH` | Diagnostic (Windows): 1 enables F10, which starts and stops logging which bytes of the loaded save the game reads; the report goes to `user\savewatch.txt`. | `src/runtime_savewatch.c` |
 | `PS4RT_SCENE_STENCIL_BITS` | 1 forces the stencil-bits path when resolving scene depth targets, even where shader stencil export is supported. | `gpu/shadps4/video_core/renderer_vulkan/vk_scene_resolution.cpp` |
 | `PS4RT_SETUP_START_DIR` | Folder where the setup file browser starts (default: the home folder). | `scripts/ps4rt_setup_native.cpp` |
 | `PS4RT_SQUARE_PASS` | 0 turns off the square-target pass (on by default). | `gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp` |

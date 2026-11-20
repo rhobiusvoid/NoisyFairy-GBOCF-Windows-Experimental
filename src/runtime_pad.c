@@ -621,6 +621,14 @@ typedef struct { uint32_t ms, buttons; uint8_t axes[4], l2, r2; } PadSample;
 static FILE *record_file;
 static uint64_t record_start;
 static PadSample record_last;
+static void savewatch_key(void) {
+    static int was_down;
+    if (!sdl_ready) return;
+    const bool *k=SDL_GetKeyboardState(NULL);
+    const int down=k && k[SDL_SCANCODE_F10];
+    if (down && !was_down) runtime_savewatch_toggle();
+    was_down=down;
+}
 static void record_sample(const PadData *d) {
     static const char *path; static int checked, f9_was_down;
     if (!checked) { path=getenv("PS4RT_PAD_RECORD"); checked=1; }
@@ -687,6 +695,7 @@ static int hold_after_capture;
 static void sample(PadData *d) {
     sample_host(d);
     if (ps4rtgpu_overlay_captures_input()) { hold_after_capture=1; click.side=-1; return; }
+    savewatch_key();
     record_sample(d); /* the click sources as they are: a replay plays them again */
     read_inject();
     replay_sample(d);

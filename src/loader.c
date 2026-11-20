@@ -185,9 +185,11 @@ static void isa_context_regs(CONTEXT *c, IsaRegs *regs, int to_context) {
     for (int i=0;i<16;++i) { if (to_context) *g[i]=regs->gpr[i]; else regs->gpr[i]=*g[i]; }
     if (to_context) c->EFlags=(DWORD)regs->rflags; else regs->rflags=c->EFlags;
 }
+int runtime_savewatch_fault(EXCEPTION_POINTERS *info);
 static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     DWORD code=record->ExceptionCode;
+    if ((code==EXCEPTION_ACCESS_VIOLATION || code==EXCEPTION_SINGLE_STEP) && runtime_savewatch_fault(info)) return EXCEPTION_CONTINUE_EXECUTION;
     if (code==EXCEPTION_BREAKPOINT && isa_table) {
         /* An int3 ISA site: emulated here; any other breakpoint goes on to the report below. */
         IsaRegs regs;

@@ -130,6 +130,8 @@ void runtime_font_report(void);
 uintptr_t runtime_platform_resolve(const char *name);
 void runtime_platform_report(void);
 const char *runtime_file_user_dir(void);
+/* Diagnostic (PS4RT_SAVE_WATCH=1, F10): logs which bytes of the loaded save the game reads. */
+void runtime_savewatch_toggle(void);
 void runtime_savedata_configure(const char *title);
 uintptr_t runtime_savedata_resolve(const char *name);
 void runtime_savedata_report(void);
