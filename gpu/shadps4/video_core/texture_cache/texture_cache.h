@@ -394,6 +394,7 @@ private:
 
     /// Copies image memory back to CPU.
     void DownloadImageMemory(ImageId image_id, bool sync = false);
+    bool WriteBackTiledImage(ImageId image_id);
 
     /// ps4rt: a recorded image-to-staging copy, written to guest memory after a GPU wait.
     struct PendingDownload {

@@ -33,11 +33,9 @@ inline std::optional<CpuImageWritebackRange> GetCpuImageWritebackRange(
 
 // The current CPU-write preservation path supports the observed single-sample
 // RGBA8 microtiled layout. Extend this only with matching transfer coverage.
-inline bool CanPreserveCpuImageWrite(const ImageInfo& info, VAddr address, u64 size) {
-    if (!size || !info.guest_size || address >= info.guest_address + info.guest_size ||
-        (address < info.guest_address && size <= info.guest_address - address)) {
-        return false;
-    }
+// The one layout both write-back paths are proven on: single-sample RGBA8 microtiled, one mip and
+// one layer, no compression metadata.
+inline bool IsPreservableTiledLayout(const ImageInfo& info) {
     return info.type == AmdGpu::ImageType::Color2D && info.size.depth == 1 &&
            info.resources.levels == 1 && info.resources.layers == 1 &&
            info.num_samples == 1 && info.guest_samples == 1 && info.num_bits == 32 &&
@@ -49,6 +47,16 @@ inline bool CanPreserveCpuImageWrite(const ImageInfo& info, VAddr address, u64 s
            info.size.width && info.size.height &&
            info.mips_layout[0].size && info.mips_layout[0].size <= info.guest_size &&
            !info.meta_info.cmask_addr && !info.meta_info.fmask_addr && !info.meta_info.htile_addr;
+}
+
+// The current CPU-write preservation path supports the observed single-sample
+// RGBA8 microtiled layout. Extend this only with matching transfer coverage.
+inline bool CanPreserveCpuImageWrite(const ImageInfo& info, VAddr address, u64 size) {
+    if (!size || !info.guest_size || address >= info.guest_address + info.guest_size ||
+        (address < info.guest_address && size <= info.guest_address - address)) {
+        return false;
+    }
+    return IsPreservableTiledLayout(info);
 }
 
 } // namespace VideoCore

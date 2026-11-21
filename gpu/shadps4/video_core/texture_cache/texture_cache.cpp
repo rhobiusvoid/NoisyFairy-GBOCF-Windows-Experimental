@@ -305,6 +305,47 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
 
 
 
+// ps4rt: writes a GPU-written tiled image back to guest memory in the guest's own tiled layout, so
+// the image can be freed under memory pressure without losing its contents (the next read
+// re-uploads it from guest memory). Same transfer as PreserveGpuImagesForCpuWrite; only the layout
+// that path is proven on is handled (IsPreservableTiledLayout). Returns false if nothing was written.
+bool TextureCache::WriteBackTiledImage(ImageId image_id) {
+    Image& image = slot_images[image_id];
+    const auto& info = image.info;
+    if (!image.SafeToDownload() || True(image.flags & ImageFlagBits::Aliased) ||
+        !IsPreservableTiledLayout(info)) {
+        return false;
+    }
+    // Head and tail pages may already belong to someone else; only the still-tracked part is ours.
+    const auto publish = GetCpuImageWritebackRange(info, image.track_addr, image.track_addr_end);
+    if (!publish) {
+        return false;
+    }
+    if (buffer_cache.IsRegionGpuModified(publish->address, publish->size)) {
+        buffer_cache.ReadMemory(publish->address, publish->size, false, true);
+    }
+    const auto download = runtime.GetStagingPool().Request(info.guest_size, MemoryType::HostCached,
+                                                           instance.StorageMinAlignment());
+    const auto& mip = info.mips_layout[0];
+    vk::BufferImageCopy copy{
+        .bufferOffset = 0,
+        .bufferRowLength = mip.pitch,
+        .bufferImageHeight = mip.height,
+        .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {info.size.width, info.size.height, 1},
+    };
+    tile_manager.TileImage(image, std::span{&copy, 1}, download.buffer, download.offset);
+    scheduler.Finish();
+    download.Invalidate();
+    Core::Memory::Instance()->TryWriteBacking(
+        std::bit_cast<u8*>(publish->address),
+        download.mapped + (publish->address - info.guest_address), publish->size);
+    buffer_cache.InvalidateMemory(publish->address, publish->size, true);
+    return true;
+}
+
+
 // ps4rt: images sharing guest memory (aliases), ported from cuesta4/shadPS4 (eltutz) commit
 // 189ca3b6. A write to one is copied into the others before they are read, as on the PS4,
 // where they are the same memory.
@@ -1723,6 +1764,7 @@ void TextureCache::GarbageCollectImages() {
     static u64 gc_discards = 0;
     u64 ticks_to_destroy = 0;
     size_t num_deletions = 0;
+    u32 tiled_writebacks = 0;
 
     const auto configure = [&](bool allow_aggressive) {
         pressured = total_used_memory >= pressure_gc_memory;
@@ -1755,6 +1797,22 @@ void TextureCache::GarbageCollectImages() {
             // (the LRU visits oldest first), only 300+ ticks idle, and only until usage is back
             // under 85% of the budget; the first version dropped up to 64 per pass, 100-250 images
             // per report, and sirprize saw MS colours go to noise.
+            // Root cause of the rainbow noise: this branch used to be the only way out for tiled
+            // GPU-written images. The layout used by the colour-change textures can be written
+            // back tiled (WriteBackTiledImage), so such images now go back to guest memory like any
+            // other and are freed without losing anything. A few per pass: each one waits for the GPU.
+            if (Ps4RtGpuWorkarounds::Current().preserve_rgba8_cpu_writes &&
+                IsPreservableTiledLayout(image.info) && image.SafeToDownload()) {
+                if (pressured && tiled_writebacks < 4 && WriteBackTiledImage(image_id)) {
+                    ++tiled_writebacks;
+                    ++gc_downloads;
+                    ++gc_evictions;
+                    FreeImage(image_id);
+                    return false;
+                }
+                ++num_deletions;   // not now (not under pressure yet, or the per-pass limit)
+                return false;
+            }
             if (emergency_discard && total_used_memory >= discard_floor &&
                 gc_tick - image.lru_touched_tick >= 300) {
                 ++gc_discards;

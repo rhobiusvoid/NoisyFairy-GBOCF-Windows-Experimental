@@ -185,6 +185,23 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
     available_extensions = GetSupportedExtensions(physical_device);
     format_properties = GetFormatProperties(physical_device);
     properties = physical_device.getProperties();
+    {
+        // ps4rt: the driver version in the log header, so crash reports carry it. NVIDIA packs
+        // it as major.minor.patch.build (560.94 is 560, 94); other vendors use the Vulkan layout.
+        const u32 v = properties.driverVersion;
+        if (properties.vendorID == 0x10de) {
+            std::printf("GPU: driver %u.%02u (Vulkan %u.%u.%u)\n", v >> 22, (v >> 14) & 0xff,
+                        VK_VERSION_MAJOR(properties.apiVersion),
+                        VK_VERSION_MINOR(properties.apiVersion),
+                        VK_VERSION_PATCH(properties.apiVersion));
+        } else {
+            std::printf("GPU: driver %u.%u.%u, vendor 0x%04x (Vulkan %u.%u.%u)\n",
+                        VK_VERSION_MAJOR(v), VK_VERSION_MINOR(v), VK_VERSION_PATCH(v),
+                        properties.vendorID, VK_VERSION_MAJOR(properties.apiVersion),
+                        VK_VERSION_MINOR(properties.apiVersion),
+                        VK_VERSION_PATCH(properties.apiVersion));
+        }
+    }
     memory_properties = physical_device.getMemoryProperties();
     CollectDeviceParameters();
     ASSERT_MSG(properties.apiVersion >= TargetVulkanApiVersion,
