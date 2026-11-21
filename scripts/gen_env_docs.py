@@ -24,6 +24,7 @@ OVERRIDES = {
     'PS4RT_PAD_FILE': 'Reads the pad state from this file while the game runs (test input).',
     'PS4RT_PAD_RECORD': 'F9 starts and stops recording the pad state to this file.',
     'PS4RT_PAD_REPLAY': 'Plays back a recording made with PS4RT_PAD_RECORD.',
+    'PS4RT_NO_TILED_WRITEBACK': 'Set to 1 to stop the texture cache writing colour-change (RGBA8 tiled) images back to guest memory before freeing them under memory pressure; they are then skipped or dropped as before. For A/B comparisons.',
     'PS4RT_SAVE_WATCH': 'Diagnostic (Windows): 1 enables F10, which starts and stops logging which bytes of the loaded save the game reads; the report goes to `user\\savewatch.txt`.',
     'PS4RT_ACHIEVEMENTS_DIR': 'Folder for the local achievement (trophy) progress files. Empty: the default location is used.',
     'PS4RT_ASYNC_WRITE_FAULT': 'GPU buffer write faults are handled asynchronously by default; 0 turns that off.',

@@ -1801,7 +1801,9 @@ void TextureCache::GarbageCollectImages() {
             // GPU-written images. The layout used by the colour-change textures can be written
             // back tiled (WriteBackTiledImage), so such images now go back to guest memory like any
             // other and are freed without losing anything. A few per pass: each one waits for the GPU.
-            if (Ps4RtGpuWorkarounds::Current().preserve_rgba8_cpu_writes &&
+            // PS4RT_NO_TILED_WRITEBACK=1 turns this off (to compare against the old behaviour).
+            static const bool writeback_enabled = !std::getenv("PS4RT_NO_TILED_WRITEBACK");
+            if (writeback_enabled && Ps4RtGpuWorkarounds::Current().preserve_rgba8_cpu_writes &&
                 IsPreservableTiledLayout(image.info) && image.SafeToDownload()) {
                 if (pressured && tiled_writebacks < 4 && WriteBackTiledImage(image_id)) {
                     ++tiled_writebacks;
@@ -1817,6 +1819,21 @@ void TextureCache::GarbageCollectImages() {
                 gc_tick - image.lru_touched_tick >= 300) {
                 ++gc_discards;
                 ++gc_evictions;
+                // ps4rt: which images still get dropped (layouts the tiled write-back does not cover).
+                static u32 dropped_logged = 0;
+                if (dropped_logged++ < 40) {
+                    const auto& i = image.info;
+                    std::printf("Texture cache: dropped %#llx %ux%u pitch %u bits %u fmt %d tile %u levels %u "
+                                "layers %u samples %u/%u depth %d block %d aliased %d meta c/f/h %d/%d/%d\n",
+                                static_cast<unsigned long long>(i.guest_address), i.size.width,
+                                i.size.height, i.pitch, i.num_bits, int(i.pixel_format),
+                                u32(i.tile_mode), i.resources.levels, i.resources.layers,
+                                i.num_samples, i.guest_samples, int(i.props.is_depth),
+                                int(i.props.is_block),
+                                int(True(image.flags & ImageFlagBits::Aliased)),
+                                int(i.meta_info.cmask_addr != 0), int(i.meta_info.fmask_addr != 0),
+                                int(i.meta_info.htile_addr != 0));
+                }
                 FreeImage(image_id);
                 return false;
             }

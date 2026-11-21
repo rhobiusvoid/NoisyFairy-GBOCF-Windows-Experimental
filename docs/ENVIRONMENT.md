@@ -5,7 +5,7 @@ Most of these are developer switches; players normally use the launcher or `ps4r
 The "purpose" column is the nearest source comment, so it may be terse or empty;
 the file column says where to read the real behaviour.
 
-98 variables.
+99 variables.
 
 | Variable | Purpose (from the source) | Read in |
 |---|---|---|
@@ -60,6 +60,7 @@ the file column says where to read the real behaviour.
 | `PS4RT_MENU_SOUND_VOLUME` | Menu sound volume, 0-100 (default 65). | `gpu/shim/ps4rt_menu_sounds.h` |
 | `PS4RT_MOTION_SELECT_LOG` | PS4RT_MOTION_SELECT_LOG=1: each G-buffer vertex shader once, with its buffer sizes | `gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_cache.cpp` |
 | `PS4RT_NO_MSAA` | ps4rt: see video_core/amdgpu/ps4rt_msaa.h; the default per driver is ps4rt_msaa_default.h. | `gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp` |
+| `PS4RT_NO_TILED_WRITEBACK` | Set to 1 to stop the texture cache writing colour-change (RGBA8 tiled) images back to guest memory before freeing them under memory pressure; they are then skipped or dropped as before. For A/B comparisons. | `gpu/shadps4/video_core/texture_cache/texture_cache.cpp` |
 | `PS4RT_NO_WARMUP` | Diagnostics: PS4RT_NO_WARMUP=1 builds every pipeline live, ignoring the stored ones. | `gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_serialization.cpp` |
 | `PS4RT_OBJECT_MOTION_ALL` | 1 gives every object motion vectors for the upscaler, not only the usual ones. | `gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_cache.cpp`, `gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp` |
 | `PS4RT_ORIGINAL_GAME_DIR` | Linux only: game folder passed to the DLC install script. | `gpu/shim/ps4rt_overlay.cpp` |
